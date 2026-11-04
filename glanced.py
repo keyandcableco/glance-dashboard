@@ -23,6 +23,8 @@ from bless import BlessServer, GATTAttributePermissions, GATTCharacteristicPrope
 
 import brain
 import calwatch
+import shopapp
+import statusring
 import clockvoice
 import config
 import mailwatch
@@ -104,6 +106,7 @@ class Clock:
         self.unread = unread.Unread(name)
         self.ring = None  # (due epoch, unread item id) of the countdown on the ring
         self.ring_unknown = True  # after a start the clock may still run a countdown we no longer know about
+        self.last_alert = 0.0  # when an alert or countdown was last sent (the status ring waits after it)
 
     async def countdown(self, due, owner, text):
         """Ask for a ring countdown to `due` for unread item `owner`. The clock has one ring
@@ -142,6 +145,8 @@ class Clock:
             raise ConnectionError("clock not connected")
         async with self.lock:
             await self.client.write_gatt_char(CHAR, data, response=True)
+        if data[:1] in (bytes([NOTIFY]), bytes([TIMER])):
+            self.last_alert = time.time()
 
     @property
     def connected(self):
@@ -370,6 +375,13 @@ def make_app(clocks, shop_url=None):
             return "/cancel", {"what": args.get("what", ""), **target}
         if name in ("clock_in", "clock_out"):
             return "/shopclock", {"in": name == "clock_in", **target}
+        if name == "switch_job":
+            return "/shopapi", {"path": "/api/clock/job", "body": {"text": args["text"]}, **target}
+        if name == "wait_on_customer":
+            body = {"text": args["text"], **({"days": args["days"]} if args.get("days") else {})}
+            return "/shopapi", {"path": "/api/followups", "body": body, **target}
+        if name == "customer_replied":
+            return "/shopapi", {"path": "/api/followups/resolve", "body": {"text": args["text"]}, **target}
         if name == "clear_unread":
             return "/unread/clear", target
         return None
@@ -387,18 +399,19 @@ def make_app(clocks, shop_url=None):
 
     async def shop_clock(clock_in):
         """Clock in or out through the shop app's desk-button API (GET /api/clock, POST /api/clock/toggle)."""
-        url = shop_url.rstrip("/")
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as http:
-            async with http.get(url + "/api/clock") as r:
-                if r.status == 404:
-                    return "The shop app doesn't have the clock in and out feature yet."
-                state = await r.json()
-            if state["clocked_in"] == clock_in:
-                return f"You're already clocked {'in' if clock_in else 'out'}" + (f", since {state['since']}." if clock_in else ".")
-            async with http.post(url + "/api/clock/toggle") as r:
-                state = await r.json()
+        status, state = await shopapp.call(shop_url, "GET", "/api/clock")
+        if status == 404:
+            return "The shop app doesn't have the clock in and out feature yet."
+        if status != 200 or "clocked_in" not in state:
+            return "The shop app gave an answer I don't understand."
+        if state["clocked_in"] == clock_in:
+            since = f", since {state['since']}" if clock_in and state.get("since") else ""
+            return f"You're already clocked {'in' if clock_in else 'out'}{since}."
+        status, state = await shopapp.call(shop_url, "POST", "/api/clock/toggle")
+        if not 200 <= status < 300:
+            return "The shop app couldn't change the clock."
         if clock_in:
-            return f"Clocked in at {state['since']}."
+            return f"Clocked in at {state['since']}." if state.get("since") else "Clocked in."
         return "Clocked out. Split the time in the shop app." if state.get("to_assign") else "Clocked out."
 
     async def voice(request):
@@ -432,6 +445,20 @@ def make_app(clocks, shop_url=None):
                     if reply.startswith("Clocked"):
                         await clock.alert("voice", text="{clock} " + ("CLOCKED IN" if args["in"] else "CLOCKED OUT"),
                                           color="White", sound="NoneSound", priority="critical")
+            elif path == "/shopapi":
+                if not shop_url:
+                    reply = "There's no shop app set up in the config."
+                else:
+                    status, answer = await shopapp.call(shop_url, "POST", args["path"], args["body"])
+                    ok = 200 <= status < 300 and answer.get("ok", True) is not False
+                    if status == 404:
+                        reply = "The shop app doesn't have that feature yet."
+                    else:
+                        reply = str(answer.get("say") or ("Done." if ok else "The shop app said no."))
+                    if ok and args["path"] == "/api/followups/resolve":
+                        due_now = await shopapp.due(shop_url)  # take the resolved nag off the clock now
+                        if due_now is not None:
+                            shopapp.prune(default, due_now)
             elif path == "/note":
                 notebook.add(args["text"])
                 await clock.alert("voice", text="{sun} NOTED", color="Aqua", anim="Pulse", sound="NoneSound",
@@ -453,7 +480,10 @@ def make_app(clocks, shop_url=None):
                 reply = reply or "Cleared."
         except ValueError as e:
             return web.json_response({"reply": f"Sorry, {e}.", "via": via})
+        except shopapp.ERRORS:
+            return web.json_response({"reply": "The shop app isn't answering.", "via": via})
         except Exception:
+            log.exception("voice command failed: %r", text)
             return web.json_response({"reply": "The clock isn't answering.", "via": via})
         if clock is not default:
             reply = f"{clock.name.capitalize()} clock: {reply}"
@@ -526,12 +556,16 @@ async def main():
         clock.nudges = nudges.Settings(name, c.get("nudges"))
         watchers = {"connection": clock.keep_connected, "replay": lambda clock=clock: unread.replay(clock),
                     "pickups": lambda clock=clock: pickups.watch(clock), "nudges": lambda clock=clock: nudges.watch(clock)}
+        ring = statusring.watch if c.get("status_ring", True) else statusring.clear
+        watchers["ring"] = lambda clock=clock, ring=ring: ring(clock)
         if "mail" in c:
             watchers["mail"] = lambda clock=clock, c=c: mailwatch.watch(clock, c["mail"])
         if "texts" in c:
             watchers["texts"] = lambda clock=clock, c=c: textwatch.watch(clock, c["texts"])
         if "calendar" in c:
             watchers["calendar"] = lambda clock=clock, c=c: calwatch.watch(clock, c["calendar"])
+        if not tasks and cfg.get("shop_app", {}).get("url"):  # follow-up nags go to the first clock
+            watchers["followups"] = lambda clock=clock: shopapp.watch_followups(clock, cfg["shop_app"])
         tasks += [asyncio.create_task(supervised(f"{name} {label}", start)) for label, start in watchers.items()]
     runner = web.AppRunner(make_app(clocks, cfg.get("shop_app", {}).get("url")))
     await runner.setup()

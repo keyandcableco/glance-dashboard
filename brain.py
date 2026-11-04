@@ -17,20 +17,22 @@ KEY_FILE = Path(__file__).parent / "anthropic_api_key"
 SYSTEM = """You turn a short spoken command into exactly one call to one of your tools. The words were \
 transcribed from speech across a workshop, so expect missing punctuation and misheard words; go by \
 the likely meaning. Times: give `minutes` for a duration from now ("in half an hour" = 30) or `at` \
-as 24-hour HH:MM for a clock time ("after lunch" = 13:00, "end of day" = 17:00); set the other to null. \
-Labels and names are short (a few words) and in capitals. `clock` is null unless the speaker names \
-one of the clocks. If the request doesn't fit any tool, don't call one; reply with one short sentence \
+as 24-hour HH:MM for a clock time ("after lunch" = 13:00, "end of day" = 17:00); set the other to 0 or \
+empty. Timer, pickup and stop labels are short (a few words) and in capitals; text for the shop app \
+(switch_job, wait_on_customer, customer_replied) stays as said, so names still match. `clock` is empty unless the speaker \
+names one of the clocks. If the request doesn't fit any tool, don't call one; reply with one short sentence \
 saying what you can do instead."""
 
+# Plain types with empty defaults: strict tools allow only 16 nullable fields in all
 WHEN = {
-    "minutes": {"type": ["integer", "null"], "description": "Minutes from now, or null"},
-    "at": {"type": ["string", "null"], "description": "24-hour HH:MM clock time, or null"},
+    "minutes": {"type": "integer", "description": "Minutes from now, or 0"},
+    "at": {"type": "string", "description": "24-hour HH:MM clock time, or empty"},
 }
 
 
 def tools(clock_names):
-    clock = {"anyOf": [{"type": "string", "enum": list(clock_names)}, {"type": "null"}],
-             "description": "Which clock, only if the speaker named one"}
+    clock = {"type": "string", "enum": [*clock_names, ""],
+             "description": "Which clock, only if the speaker named one; else empty"}
 
     def tool(name, description, props):
         props = {**props, "clock": clock}
@@ -52,6 +54,15 @@ def tools(clock_names):
         tool("add_note", "Save a note to self for later, with no time attached (an idea, something to order, "
              "something to remember). Use set_timer instead when a time is given.",
              {"text": {"type": "string", "description": "The note, in the speaker's words, tidied"}}),
+        tool("switch_job", "Say which instrument (or 'shop time') the speaker is working on now, e.g. "
+             "'working on the Juno', 'switching to Alex's Rhodes'. Clocks in if needed.",
+             {"text": {"type": "string", "description": "The instrument as said, e.g. Alex's Rhodes"}}),
+        tool("wait_on_customer", "The speaker is waiting on a customer for something (approval, a decision, "
+             "payment, a part they're sending). The shop app reminds them to follow up after some days.",
+             {"text": {"type": "string", "description": "Who/which instrument and what, e.g. Sam's approval for the Juno"},
+              "days": {"type": "integer", "description": "Days until the reminder, if said; else 0"}}),
+        tool("customer_replied", "A customer got back about something the speaker was waiting on.",
+             {"text": {"type": "string", "description": "Who/which instrument, e.g. Sam about the Juno"}}),
         tool("clock_in", "Clock in: start the shop's work clock.", {}),
         tool("clock_out", "Clock out: stop the shop's work clock.", {}),
         tool("clear_unread", "Clear everything waiting on the clock (only when asked to clear all of it).", {}),

@@ -1,7 +1,7 @@
 """Unread list: alerts worth keeping (orders, requests, texts) until they're cleared.
 
-The clock's own saved scenes didn't display in testing, so the bridge replays unread items itself:
-every REPLAY_MINUTES it shows each one in turn, silently.
+The bridge replays unread items itself as alerts: every REPLAY_MINUTES it shows each one in turn,
+silently. (The status ring shows them at a glance in between.)
 """
 import asyncio
 import json

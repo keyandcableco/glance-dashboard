@@ -112,12 +112,13 @@ def closing_today(values, now):
 
 async def watch(clock):
     idle = Idle()
+    clock.focus = None
     active_since, said = None, set()  # said: closing nudges already given, as (date, which)
     while True:
         await asyncio.sleep(30)
         v, now = clock.nudges.values, time.time()
         if now < v["snooze_until"]:
-            active_since = None
+            active_since = clock.focus = None
             continue
         quiet = idle.seconds()
         if not v["breaks"] or quiet is None or quiet >= v["pause_minutes"] * 60:
@@ -128,6 +129,8 @@ async def watch(clock):
             minutes = int((now - active_since) // 60)
             await say(clock, f"{{smiley}} BREAK - {minutes // 60}:{minutes % 60:02d} STRAIGHT. STAND, DRINK", "Steps")
             active_since = now  # next nudge after another full stretch
+        # for the status ring: (start of this active stretch, the break length), or None
+        clock.focus = (active_since, v["break_minutes"] * 60) if v["breaks"] and active_since else None
 
         today = datetime.datetime.now()
         closing = closing_today(v, today)

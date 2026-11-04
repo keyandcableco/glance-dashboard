@@ -23,13 +23,17 @@ of his `Glance.proto`, fixed so `protoc` accepts it. Everything here builds on t
 - **Timers, pickups and hard stops**, with the clock's own **ring countdown**. A hard stop nags at 30, 15
   and 5 minutes, then repeats "STOP NOW" every 5 minutes for half an hour unless cleared.
 - **Unread list** that replays silently every 5 minutes until cleared.
+- **Status ring**, always on under the clock's time and date: one colored segment per unread item on the
+  outer ring (the oldest 12), and, while break reminders are on, your current active stretch growing
+  toward the break nudge on the inner ring. It steps aside for alerts and countdowns.
+  Set `status_ring = false` in a clock's section to turn it off (the next start removes it from the clock).
 - **Hyperfocus nudges**: a break reminder after a long stretch of keyboard/mouse activity, wrap-up and
   closing-time nudges. Snooze from the panel.
-- **Voice**: `clockvoice.py` takes a transcribed sentence ("Bob's swinging by for the Juno after lunch").
+- **Voice**: `clockvoice.py` takes a transcribed sentence ("Sam's swinging by for the Juno after lunch").
   Common phrasings are matched instantly; anything looser goes to Claude Haiku with a small set of tools:
-  timers, pickups, hard stops, messages, notes, cancelling, clearing, and clocking in and out of an
-  optional shop app. Hook it to whatever dictation you use; it prints the reply and speaks it with
-  `$GLANCE_SAY` if set.
+  timers, pickups, hard stops, messages, notes, cancelling, clearing, and, with an optional shop app,
+  clocking in and out, the job you're on now, and waiting-on-customer follow-ups. Hook it to whatever dictation you use; it prints the reply and speaks it with
+  `$GLANCE_SAY` (default `~/.local/bin/say-aloud`) if that command exists.
 - **Notes to self** ("note: order more 2.2k resistors") kept as a checklist.
 - **Several clocks** by name, each with its own sources, unread list and settings.
 - **Web control panel** at `http://localhost:8740/`, optionally reachable from your phone with a password.
@@ -87,6 +91,17 @@ HTTP: use it on a network you trust, or over a VPN such as Tailscale. Requests f
 skip the password, so don't put a reverse proxy on that computer in front of it (every request would look
 local). Web pages open in your browser can't use that shortcut: other sites' requests are refused.
 
+### A shop app (optional)
+
+With `[shop_app] url` set, voice commands can clock in and out (`GET /api/clock`, `POST /api/clock/toggle`),
+say what you're working on (`POST /api/clock/job {"text"}`), and track waiting on a customer
+(`POST /api/followups {"text", "days"}`, `POST /api/followups/resolve {"text"}`). Follow-ups that come due
+(`GET /api/followups/due`, items with `id, label, waiting_on`) are nagged on the first clock at
+`followup_hours` (default 10 and 15) and dropped from the clock once resolved. Any app with these endpoints
+works (ours is a private Flask shop system), given these replies: `GET /api/clock` → `{"clocked_in", "since"}`;
+the toggle → `{"since", "to_assign"}`; other POSTs → an object whose `say` is spoken (or `"ok": false` on
+failure); `/api/followups/due` → `{"due": [...]}`.
+
 ### Environment variables
 
 `GLANCE_CONFIG` (path to the config), `GLANCE_URL` (bridge address for `pickup`, `clockvoice.py` and the
@@ -133,7 +148,7 @@ an unknown `{name}`; everywhere else (email subjects, calendar titles, names) it
 
 `glanced.py` the bridge · `glance.py` protocol helpers + one-shot CLI · `config.py` · `mailwatch.py`,
 `textwatch.py`, `calwatch.py` sources · `pickups.py` timers/pickups/stops · `unread.py` · `nudges.py` ·
-`notes.py` · `brain.py` Haiku · `clockvoice.py` voice front end · `panel.html` · `pickup` CLI ·
+`notes.py` · `statusring.py` · `shopapp.py` optional shop app · `brain.py` Haiku · `clockvoice.py` voice front end · `panel.html` · `pickup` CLI ·
 `set_setting.py` · `contrib/`
 
 ## License

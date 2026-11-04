@@ -1,9 +1,9 @@
 #!/usr/bin/python3
 """Spoken clock commands: the text of a dictation that starts with "clock" (or follows a "hey glance" wake word).
 
-    clock, timer 30 minutes                      clock, remind me in 20 minutes to call Bob
-    clock, timer an hour and a half for lunch    clock, Bob is picking up the Juno at 2:30
-    clock, pickup Bob in 40 minutes              clock, show back in 5
+    clock, timer 30 minutes                      clock, remind me in 20 minutes to call Sam
+    clock, timer an hour and a half for lunch    clock, Sam is picking up the Juno at 2:30
+    clock, pickup Sam in 40 minutes              clock, show back in 5
     clock, clear                                 clockvoice.py --dry-run "clock, timer 30 minutes"
     clock, family, timer 10 minutes              (a clock's name first sends it to that clock)
 

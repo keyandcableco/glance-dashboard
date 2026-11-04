@@ -3,13 +3,15 @@
 
 port = 8740
 
-# Optional: a shop app with a clock in/out API (GET /api/clock, POST /api/clock/toggle),
-# for "hey glance, clock me in".
+# Optional: a shop app API for "hey glance, clock me in", "working on the Juno",
+# "waiting on Sam's approval" (see README, "A shop app").
 # [shop_app]
 # url = "http://192.168.1.50:8001"
+# followup_hours = [10, 15]   # when to nag about follow-ups that are due
 
 [clocks.office]
 address = "AA:BB:CC:DD:EE:FF"   # bluetoothctl devices, after pairing (see README)
+# status_ring = false           # turn off the always-on ring (unread segments, focus arc)
 
 # Optional: alert on emails in a Thunderbird inbox (its local mbox file).
 [clocks.office.mail]
