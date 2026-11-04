@@ -373,6 +373,8 @@ def make_app(clocks, shop_url=None):
             return "/note", {"text": args["text"], **target}
         if name == "cancel":
             return "/cancel", {"what": args.get("what", ""), **target}
+        if name == "change":
+            return "/change", {k: args.get(k) for k in ("what", "new_label", "minutes", "at", "add_minutes", "move_to")} | target
         if name in ("clock_in", "clock_out"):
             return "/shopclock", {"in": name == "clock_in", **target}
         if name == "switch_job":
@@ -386,16 +388,50 @@ def make_app(clocks, shop_url=None):
             return "/unread/clear", target
         return None
 
+    def set_now():
+        """The timers, pickups and stops set on every clock, for Haiku: the item's text (what `what`
+        matches), and when it was set and for how long, so "the hour 37 timer" can be found."""
+        lines = []
+        for clock in clocks.values():
+            for i in clock.unread.items:
+                if i.get("due") and i.get("kind") in pickups.KINDS:
+                    minutes = round((i["due"] - i["time"]) / 60)
+                    set_at = datetime.datetime.fromtimestamp(i["time"]).strftime("%H:%M")
+                    lines.append(f"- {i['text']} (on {clock.name}; set {set_at} for {minutes // 60} h {minutes % 60} min)")
+        return "\n".join(lines)
+
     def cancel(clock, what):
-        """Clear the timer, pickup or stop whose label or name has these words; the newest if none given."""
-        words = [w for w in re.findall(r"[a-z0-9]+", what.lower()) if w not in ("the", "a", "my", "timer", "reminder")]
-        due = [i for i in clock.unread.items if i.get("due")]
-        hits = [i for i in due if all(w in i["text"].lower() for w in words)] if words else due
-        if not hits:
-            return None
-        item = max(hits, key=lambda i: i["time"])
-        clock.unread.clear(item["id"])
+        """Clear the timer, pickup or stop whose label or name has these words; with none, the one
+        going off, else the newest."""
+        item = pickups.find(clock, what)
+        if item:
+            clock.unread.clear(item["id"])
         return item
+
+    async def change(clock, args):
+        """Rename, reschedule, snooze or move an existing timer, pickup or stop. Returns the reply."""
+        item = pickups.find(clock, args.get("what") or "")
+        if not item:
+            return "There's nothing like that set."
+        now = time.time()
+        due = None
+        if args.get("minutes"):
+            due = now + int(args["minutes"]) * 60
+        elif args.get("at"):
+            due = pickups.parse_when(args["at"])
+        elif args.get("add_minutes"):
+            base = now if item["due"] <= now else item["due"]  # going off: from now; still ahead: later
+            due = base + int(args["add_minutes"]) * 60
+        name = args["new_label"].upper()[:60] if args.get("new_label") else None
+        if due is None and name is None and not args.get("move_to"):
+            return "What should I change about it?"
+        if due is not None or name is not None:
+            item = await pickups.change(clock, item, name=name, due=due)
+        target = clocks.get(args.get("move_to") or "")
+        if target and target is not clock:
+            item = await pickups.move(clock, target, item)
+            return f"Moved to the {target.name} clock: {clockvoice.spoken_due(item)}"
+        return "Changed. " + clockvoice.spoken_due(item)
 
     async def shop_clock(clock_in):
         """Clock in or out through the shop app's desk-button API (GET /api/clock, POST /api/clock/toggle)."""
@@ -424,7 +460,7 @@ def make_app(clocks, shop_url=None):
             path, args, reply = parsed
         else:
             via = "haiku"
-            understood = await brain.understand(api, text, list(clocks))
+            understood = await brain.understand(api, text, list(clocks), set_now())
             if understood is None:
                 return web.json_response({"reply": "Sorry, I didn't get that clock command.", "via": "none"})
             if understood[0] == "reply":
@@ -464,6 +500,8 @@ def make_app(clocks, shop_url=None):
                 await clock.alert("voice", text="{sun} NOTED", color="Aqua", anim="Pulse", sound="NoneSound",
                                   priority="critical")
                 reply = "Noted."
+            elif path == "/change":
+                reply = await change(clock, args)
             elif path == "/cancel":
                 item = cancel(clock, args.get("what", ""))
                 await clock.refresh_ring()

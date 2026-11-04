@@ -53,21 +53,71 @@ def clock_time(epoch):
     return datetime.datetime.fromtimestamp(epoch).strftime("%I:%M").lstrip("0")
 
 
+def text_of(item):
+    return " ".join(filter(None, (KINDS[item["kind"]]["label"], item.get("name"), clock_time(item["due"]))))[:120]
+
+
+def schedule(item, due):
+    """Set (or move) an item's due time: text, warnings already passed, and countdown start afresh."""
+    spec = KINDS[item["kind"]]
+    left = due - time.time()
+    item.update(due=due, text=text_of({**item, "due": due}),
+                fired=[w for w in spec["warn"] if left <= (w + 1) * 60])
+    for key in ("done", "repeated", "ringing", "ring_due", "ring_text"):
+        item.pop(key, None)
+
+
 async def add(clock, name, when, kind="pickup"):
     spec = KINDS[kind]
     due = parse_when(when)
-    text = " ".join(filter(None, (spec["label"], name, clock_time(due))))[:120]
-    item = clock.unread.add({"text": text, **spec["look"]}, kind)
-    left = due - time.time()
-    item.update(due=due, kind=kind, name=name, fired=[w for w in spec["warn"] if left <= (w + 1) * 60])
+    item = clock.unread.add({"text": "", **spec["look"]}, kind)
+    item.update(kind=kind, name=name)
+    schedule(item, due)
     clock.unread._save()
-    log.info("%s added: %s", kind, text)
+    log.info("%s added: %s", kind, item["text"])
     await start_ring(clock, item)
     try:
-        await clock.notify(text=text, **spec["look"], **ALERT)
+        await clock.notify(text=item["text"], **spec["look"], **ALERT)
     except Exception as e:
         log.warning("%s alert failed: %s", kind, e)
     return item
+
+
+def find(clock, what=""):
+    """The timer, pickup or stop whose text has all these words; with none, the one going off
+    (due in the last 15 minutes), else the newest. None if there's no match."""
+    words = [w for w in re.findall(r"[a-z0-9]+", what.lower()) if w not in ("the", "a", "my", "that", "it", "one", "reminder")]
+    items = [i for i in clock.unread.items if i.get("due") and i.get("kind") in KINDS]
+    if words:
+        items = [i for i in items if all(w in i["text"].lower() for w in words)]
+        return max(items, key=lambda i: i["time"], default=None)
+    going_off = [i for i in items if 0 <= time.time() - i["due"] <= 15 * 60]
+    return max(going_off or items, key=lambda i: i["due"] if going_off else i["time"], default=None)
+
+
+async def change(clock, item, name=None, due=None):
+    """Rename and/or reschedule an existing item, then put it back on the ring and show it."""
+    if name is not None:
+        item["name"] = name
+    schedule(item, due if due is not None else item["due"])
+    clock.unread._save()
+    log.info("%s changed: %s", item["kind"], item["text"])
+    await clock.refresh_ring()
+    await start_ring(clock, item)
+    try:
+        await clock.notify(text=item["text"], **KINDS[item["kind"]]["look"], **ALERT)
+    except Exception as e:
+        log.warning("%s alert failed: %s", item["kind"], e)
+    return item
+
+
+async def move(src, dst, item):
+    """Move an item to another clock (same name and time)."""
+    src.unread.clear(item["id"])
+    await src.refresh_ring()
+    moved = dst.unread.add({"text": "", **KINDS[item["kind"]]["look"]}, item["kind"])
+    moved.update(kind=item["kind"], name=item.get("name", ""))
+    return await change(dst, moved, due=item["due"])
 
 
 async def start_ring(clock, item):

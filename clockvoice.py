@@ -79,6 +79,8 @@ def parse(text, names=()):
     (one of `names`) picks that clock."""
     t = words_to_digits(text).strip(" ,.;:!?")
     t = re.sub(r"^(?:hey\s+)?(?:clock|glance)\b[\s,.:;!-]*", "", t)
+    # the end phrase heard twice ("send it send it") leaves one behind; it's never part of the command
+    t = re.sub(r"(?:[\s,.;:!?-]*\b(?:send it|new ?line)\b)+[\s.,;:!?]*$", "", t)
     target = next((n for n in names if re.match(rf"{re.escape(n.lower())}(?:'s)?(?: clock)?\b", t)), None)
     if target:
         t = re.sub(rf"^{re.escape(target.lower())}(?:'s)?(?: clock)?\b[\s,.:;!-]*", "", t)
@@ -93,7 +95,8 @@ def parse(text, names=()):
 
 
 def parse_command(t):
-    if re.search(r"\b(?:cancel|stop|kill|delete|remove|never ?mind|turn off|shut off|dismiss)\b", t) and \
+    if re.search(r"\b(?:cancel|stop|kill|delete|remove|never ?mind|turn off|shut off|dismiss|rename|call it|"
+                 r"push|move|change|snooze|extend|instead|more (?:minutes?|time)|make (?:it|that))\b", t) and \
             not re.fullmatch(r"(?:clear|clear (?:it|all|everything)|all clear|dismiss(?: all)?)", t):
         return None  # cancelling, not setting: leave it to the bridge's Haiku
     if re.fullmatch(r"(?:clear|clear (?:it|all|everything)|all clear|dismiss(?: all)?)", t):

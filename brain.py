@@ -49,6 +49,15 @@ def tools(clock_names):
         tool("set_hard_stop", "The speaker must stop working at a time (leave, close up, quit for the "
              "night). Nags at 30, 15 and 5 minutes before, then repeats for half an hour unless cleared.",
              {**WHEN, "label": {"type": "string", "description": "Why, or empty"}}),
+        tool("change", "Change a timer, reminder, pickup or hard stop that's already set or going off: rename it, "
+             "move it to a new time, give it more time ('five more minutes', 'snooze it 10'), or move it "
+             "to another clock. Never use set_timer to change an existing one.",
+             {"what": {"type": "string", "description": "Words from its text as listed under Set now (e.g. '8:53' or 'GLUE'); empty for the one going off or the newest"},
+              "new_label": {"type": "string", "description": "New label/name, or empty to keep it"},
+              "minutes": {"type": "integer", "description": "New time as minutes from now, or 0"},
+              "at": {"type": "string", "description": "New time as 24-hour HH:MM, or empty"},
+              "add_minutes": {"type": "integer", "description": "Minutes to add (snooze/extend), or 0"},
+              "move_to": {"type": "string", "enum": [*clock_names, ""], "description": "Clock to move it to, or empty"}}),
         tool("cancel", "Cancel or stop a timer, reminder, pickup or hard stop that's set or going off.",
              {"what": {"type": "string", "description": "Words from its label or name; empty for the most recent"}}),
         tool("add_note", "Save a note to self for later, with no time attached (an idea, something to order, "
@@ -76,8 +85,10 @@ def client():
     return anthropic.AsyncAnthropic(api_key=key, timeout=15.0, max_retries=1) if key else None
 
 
-async def understand(api, text, clock_names):
-    """Spoken text -> ("tool", name, input) or ("reply", sentence), or None if no API key or on error."""
+async def understand(api, text, clock_names, set_now=""):
+    """Spoken text -> ("tool", name, input) or ("reply", sentence), or None if no API key or on error.
+    set_now lists the timers, pickups and stops already set, so "the hour 37 timer" or "the bread
+    one" can be found; for change and cancel, `what` should be words from that item's text."""
     if api is None:
         return None
     now = datetime.datetime.now().strftime("%A %H:%M")
@@ -88,7 +99,8 @@ async def understand(api, text, clock_names):
             output_config={"effort": "low"},
             system=SYSTEM,
             tools=tools(clock_names),
-            messages=[{"role": "user", "content": f"It is {now}. Clocks: {', '.join(clock_names)}.\n\nSaid: {text}"}],
+            messages=[{"role": "user", "content": f"It is {now}. Clocks: {', '.join(clock_names)}.\n"
+                       f"Set now:\n{set_now or '(nothing)'}\n\nSaid: {text}"}],
         )
     except anthropic.APIError as e:
         logging.getLogger("glanced.brain").warning("Haiku call failed: %s", e)
