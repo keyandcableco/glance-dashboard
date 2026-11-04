@@ -31,7 +31,9 @@ of his `Glance.proto`, fixed so `protoc` accepts it. Everything here builds on t
   closing-time nudges. Snooze from the panel.
 - **Voice**: `clockvoice.py` takes a transcribed sentence ("Sam's swinging by for the Juno after lunch").
   Common phrasings are matched instantly; anything looser goes to Claude Haiku with a small set of tools:
-  timers, pickups, hard stops, messages, notes, cancelling, clearing, and, with an optional shop app,
+  timers, pickups, hard stops, messages, notes, changing what's set ("rename the 8:53 timer to bake",
+  "push Sam back to 3", "five more minutes", "move that to the kitchen clock"), cancelling, clearing,
+  and, with an optional shop app,
   clocking in and out, the job you're on now, and waiting-on-customer follow-ups. Hook it to whatever dictation you use; it prints the reply and speaks it with
   `$GLANCE_SAY` (default `~/.local/bin/say-aloud`) if that command exists.
 - **Notes to self** ("note: order more 2.2k resistors") kept as a checklist.

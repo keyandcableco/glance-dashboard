@@ -20,7 +20,10 @@ the likely meaning. Times: give `minutes` for a duration from now ("in half an h
 as 24-hour HH:MM for a clock time ("after lunch" = 13:00, "end of day" = 17:00); set the other to 0 or \
 empty. Timer, pickup and stop labels are short (a few words) and in capitals; text for the shop app \
 (switch_job, wait_on_customer, customer_replied) stays as said, so names still match. `clock` is empty unless the speaker \
-names one of the clocks. If the request doesn't fit any tool, don't call one; reply with one short sentence \
+names one of the clocks (for change and cancel: the clock the item is on; move_to is where it goes). \
+For change and cancel, `what` is words copied from that item's text under "Set now", times as \
+written there (12-hour, e.g. 2:30). "More time", "snooze" and "five more minutes" are add_minutes, \
+never minutes. If the request doesn't fit any tool, don't call one; reply with one short sentence \
 saying what you can do instead."""
 
 # Plain types with empty defaults: strict tools allow only 16 nullable fields in all
@@ -59,7 +62,7 @@ def tools(clock_names):
               "add_minutes": {"type": "integer", "description": "Minutes to add (snooze/extend), or 0"},
               "move_to": {"type": "string", "enum": [*clock_names, ""], "description": "Clock to move it to, or empty"}}),
         tool("cancel", "Cancel or stop a timer, reminder, pickup or hard stop that's set or going off.",
-             {"what": {"type": "string", "description": "Words from its label or name; empty for the most recent"}}),
+             {"what": {"type": "string", "description": "Words from its text as listed under Set now; empty for the one going off or the newest"}}),
         tool("add_note", "Save a note to self for later, with no time attached (an idea, something to order, "
              "something to remember). Use set_timer instead when a time is given.",
              {"text": {"type": "string", "description": "The note, in the speaker's words, tidied"}}),

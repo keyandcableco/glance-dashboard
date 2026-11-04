@@ -83,23 +83,42 @@ async def add(clock, name, when, kind="pickup"):
     return item
 
 
+STOPWORDS = ("the", "a", "an", "my", "that", "it", "one", "reminder", "hard")
+
+
+def matches(clock, what=""):
+    """(clock, item) for each timer, pickup or stop on this clock whose text has all the words."""
+    words = [w for w in re.findall(r"[a-z0-9]+", what.lower()) if w not in STOPWORDS]
+    return [(clock, i) for i in clock.unread.items if i.get("due") and i.get("kind") in KINDS
+            and all(w in i["text"].lower() for w in words)]
+
+
+def best(candidates):
+    """The one meant: one going off (due in the last 15 minutes, latest first), else the newest set."""
+    now = time.time()
+    going_off = [c for c in candidates if 0 <= now - c[1]["due"] <= 15 * 60]
+    if going_off:
+        return max(going_off, key=lambda c: c[1]["due"])
+    return max(candidates, key=lambda c: c[1].get("time", 0), default=None)
+
+
 def find(clock, what=""):
-    """The timer, pickup or stop whose text has all these words; with none, the one going off
-    (due in the last 15 minutes), else the newest. None if there's no match."""
-    words = [w for w in re.findall(r"[a-z0-9]+", what.lower()) if w not in ("the", "a", "my", "that", "it", "one", "reminder")]
-    items = [i for i in clock.unread.items if i.get("due") and i.get("kind") in KINDS]
-    if words:
-        items = [i for i in items if all(w in i["text"].lower() for w in words)]
-        return max(items, key=lambda i: i["time"], default=None)
-    going_off = [i for i in items if 0 <= time.time() - i["due"] <= 15 * 60]
-    return max(going_off or items, key=lambda i: i["due"] if going_off else i["time"], default=None)
+    """The item on this clock that `what` means (see best), or None."""
+    found = best(matches(clock, what))
+    return found[1] if found else None
 
 
 async def change(clock, item, name=None, due=None):
-    """Rename and/or reschedule an existing item, then put it back on the ring and show it."""
+    """Rename and/or reschedule an existing item, then put it back on the ring and show it.
+    A rename alone keeps its warnings and nag state; a new time re-arms them."""
     if name is not None:
         item["name"] = name
-    schedule(item, due if due is not None else item["due"])
+        if item.get("ring_text"):
+            item["ring_text"] = name[:24] or KINDS[item["kind"]]["label"]
+    if due is not None:
+        schedule(item, due)
+    else:
+        item["text"] = text_of(item)
     clock.unread._save()
     log.info("%s changed: %s", item["kind"], item["text"])
     await clock.refresh_ring()
@@ -111,13 +130,15 @@ async def change(clock, item, name=None, due=None):
     return item
 
 
-async def move(src, dst, item):
-    """Move an item to another clock (same name and time)."""
+async def move(src, dst, item, name=None, due=None):
+    """Move an item to another clock, optionally renamed or rescheduled there; it keeps when it
+    was set. Added to the destination before it's removed from the source."""
+    moved = dst.unread.add({"text": "", **KINDS[item["kind"]]["look"]}, item["kind"])
+    moved.update(kind=item["kind"], name=item.get("name", ""), time=item.get("time", moved["time"]))
+    result = await change(dst, moved, name=name, due=due if due is not None else item["due"])
     src.unread.clear(item["id"])
     await src.refresh_ring()
-    moved = dst.unread.add({"text": "", **KINDS[item["kind"]]["look"]}, item["kind"])
-    moved.update(kind=item["kind"], name=item.get("name", ""))
-    return await change(dst, moved, due=item["due"])
+    return result
 
 
 async def start_ring(clock, item):

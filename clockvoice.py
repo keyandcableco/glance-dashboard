@@ -71,7 +71,7 @@ def strip_time(t):
 
 def tidy(name):
     name = re.sub(r"^(?:to|for|that|about)\s+", "", " ".join(name.split()).strip(" ,.;:!?-"))
-    return name.upper()[:24].strip()  # the clock reads best in capitals, like its other labels
+    return name.upper()[:40].strip()  # the clock reads best in capitals, like its other labels
 
 
 def parse(text, names=()):
@@ -79,8 +79,6 @@ def parse(text, names=()):
     (one of `names`) picks that clock."""
     t = words_to_digits(text).strip(" ,.;:!?")
     t = re.sub(r"^(?:hey\s+)?(?:clock|glance)\b[\s,.:;!-]*", "", t)
-    # the end phrase heard twice ("send it send it") leaves one behind; it's never part of the command
-    t = re.sub(r"(?:[\s,.;:!?-]*\b(?:send it|new ?line)\b)+[\s.,;:!?]*$", "", t)
     target = next((n for n in names if re.match(rf"{re.escape(n.lower())}(?:'s)?(?: clock)?\b", t)), None)
     if target:
         t = re.sub(rf"^{re.escape(target.lower())}(?:'s)?(?: clock)?\b[\s,.:;!-]*", "", t)
@@ -94,11 +92,16 @@ def parse(text, names=()):
     return parsed
 
 
+# Changing or cancelling something already set: left to the bridge's Haiku. Only at the start, so
+# "remind me in 20 minutes to change the strings" is still an instant new timer.
+EDIT = re.compile(r"^(?:please\s+)?(?:cancel|stop the|kill|delete|remove|never ?mind|turn off|shut off|rename|call (?:it|that|the)|"
+                  r"push|move|change|snooze|extend|make (?:it|that|the)|give (?:it|me|that|the)|"
+                  r"(?:\w+\s+)?more (?:minutes?|time))\b")
+
+
 def parse_command(t):
-    if re.search(r"\b(?:cancel|stop|kill|delete|remove|never ?mind|turn off|shut off|dismiss|rename|call it|"
-                 r"push|move|change|snooze|extend|instead|more (?:minutes?|time)|make (?:it|that))\b", t) and \
-            not re.fullmatch(r"(?:clear|clear (?:it|all|everything)|all clear|dismiss(?: all)?)", t):
-        return None  # cancelling, not setting: leave it to the bridge's Haiku
+    if not re.match(r"(?:note|make a note|take a note|jot down|note to self)\b", t) and EDIT.match(t):
+        return None
     if re.fullmatch(r"(?:clear|clear (?:it|all|everything)|all clear|dismiss(?: all)?)", t):
         return "/unread/clear", {}, "Cleared."
     if m := re.match(r"(?:note|make a note|take a note|jot down|note to self)\b[\s,:;-]*(?:that\s+|to\s+)?(.+)", t):
