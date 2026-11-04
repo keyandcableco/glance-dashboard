@@ -1,0 +1,979 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Glance Clock</title>
+<meta name="theme-color" content="#ecebe7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f0f0e" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-16 -16 32 32'%3E%3Ccircle r='15.5' fill='%230b0b0c'/%3E%3Cg fill='none' stroke-width='4'%3E%3Cpath d='M0 -10A10 10 0 0 1 10 0' stroke='%23ff8c00'/%3E%3Cpath d='M8.7 5A10 10 0 0 1 -5 8.7' stroke='%2340e0d0'/%3E%3Cpath d='M-8.7 5A10 10 0 0 1 -8.7 -5' stroke='%2332cd32'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<style>
+  :root {
+    color-scheme: light;
+    --page: #ecebe7; --ink: #1b1b1a; --ink-2: #5f5d58; --ink-3: #6f6c65; --line: #d8d6cf; --line-2: #c3c0b8; --ctl: #85827a;
+    --field: #f7f6f3; --body-hi: #f4f4f2; --body-lo: #cdcdca; --body-edge: #bbbab6;
+    --on: #1d8a4c; --warn: #b26b00; --bad: #c0392b; --shadow: rgba(60,50,30,.28);
+    --sans: "Instrument Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --glass: #0b0b0c; --face: #1f2226; --lit: #f3f5f9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { color-scheme: dark;
+      --page: #0f0f0e; --ink: #ebe9e4; --ink-2: #a3a099; --ink-3: #85827b; --line: #2a2927; --line-2: #3d3c39; --ctl: #67655f;
+      --field: #191918; --body-hi: #9a9c9f; --body-lo: #5d5f62; --body-edge: #4a4c4f;
+      --on: #4fc47f; --warn: #e5a54a; --bad: #ef6b5d; --shadow: rgba(0,0,0,.7); }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 12px 28px 72px; }
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+  /* header: wordmark and clock picker */
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 10px 20px; flex-wrap: wrap; min-height: 60px; }
+  .brand { display: flex; align-items: center; gap: 11px; margin: 0; line-height: 0; }
+  .brand .mark { width: 26px; height: 26px; }
+  .brand .dm svg { height: 14px; }
+  .clocks { display: flex; flex-wrap: wrap; gap: 6px; }
+  .cchip { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 15px 0 13px; border-radius: 999px;
+           border: 1px solid var(--line-2); background: transparent; color: var(--ink); font: 500 14px var(--sans); cursor: pointer; }
+  .cchip[aria-pressed=true] { background: var(--ink); border-color: var(--ink); color: var(--page); }
+  .cn { text-transform: capitalize; }
+  .cled { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); flex: none; }
+  .cled.on { background: var(--on); box-shadow: 0 0 6px var(--on); }
+  .cled.off { background: var(--bad); }
+  .cc { font: 500 12px var(--mono); opacity: .75; } .cc:empty { display: none; }
+
+  /* hero: the clock drawn live, and what it means */
+  .hero { display: grid; grid-template-columns: minmax(0, 380px) minmax(0, 1fr); align-items: center; gap: 56px;
+          padding: 20px 0 40px; border-bottom: 1px solid var(--line); }
+  .face { margin: 0; position: relative; aspect-ratio: 1; }
+  .face::before { content: ""; position: absolute; inset: 3% 3% 1.5%; border-radius: 50%;
+                  box-shadow: 0 22px 44px -18px var(--shadow), 0 5px 12px -6px var(--shadow); }
+  .face svg { position: relative; display: block; width: 100%; height: 100%; }
+  .f-body { fill: url(#gBody); stroke: var(--body-edge); stroke-width: 1; }
+  .f-glass { stroke: rgba(0,0,0,.4); stroke-width: 1.2; }
+  .s-hi { stop-color: var(--body-hi); } .s-lo { stop-color: var(--body-lo); }
+  .f-sheen { fill: none; stroke: rgba(255,255,255,.055); stroke-width: 7; stroke-linecap: round; }
+  .led { fill: rgba(255,255,255,.02); }
+  .hdot { fill: #e2ecff; }
+  .px { fill: rgba(255,255,255,.012); } .px.on { fill: var(--lit); }
+  .hand { stroke: #e6e8ea; stroke-linecap: round; }
+  .hands-sh line { stroke: rgba(0,0,0,.45); stroke-linecap: round; }
+  .hub { fill: #c4c7ca; stroke: #8a8d91; stroke-width: 1; }
+  #faceLeds { transition: opacity .4s; }
+  .readout { min-width: 0; }
+  .cname { margin: 0; font-size: 46px; line-height: 1.05; font-weight: 600; letter-spacing: -.025em; text-transform: capitalize; overflow-wrap: anywhere; }
+  .caddr { margin: 8px 0 22px; font: 12.5px var(--mono); color: var(--ink-2); letter-spacing: .03em; }
+  .caddr:empty { display: none; }
+  .facts { list-style: none; margin: 0; padding: 0; }
+  .facts li { display: flex; align-items: center; gap: 14px; min-height: 44px; padding: 6px 0; font-size: 16px; border-top: 1px solid var(--line); }
+  .facts li:last-child { border-bottom: 1px solid var(--line); }
+  .facts .bad { color: var(--bad); }
+  .readout.stale .facts li + li, .readout.stale .caddr { opacity: .45; }
+  .fg { width: 20px; height: 20px; flex: none; line-height: 0; }
+  .fg svg { width: 100%; height: 100%; }
+  .mr-glass { fill: var(--face); stroke: var(--line-2); stroke-width: .6; }
+  .mr-track { fill: none; stroke: rgba(255,255,255,.13); stroke-width: 2.4; }
+  .mr-arc { fill: none; stroke-width: 2.4; }
+  .dot { fill: rgba(255,255,255,.3); } .dot.on { fill: #4fc47f; } .dot.off { fill: #ef6b5d; }
+  .sweep { fill: none; stroke: rgba(255,255,255,.55); stroke-width: 1.4; stroke-dasharray: 100; stroke-dashoffset: 100; transform: rotate(-90deg); }
+  .sweep.run { animation: sweep 10s linear forwards; }
+  @keyframes sweep { to { stroke-dashoffset: 0; } }
+
+  /* the board of sections */
+  .board { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 64px; }
+  .col { min-width: 0; }
+  .panel { padding: 28px 0 32px; border-top: 1px solid var(--line); }
+  .col:nth-child(-n+2) > .panel:first-child { border-top: 0; }
+  .sh { display: flex; align-items: center; gap: 10px; margin: 0 0 16px; min-height: 40px; }
+  .sh h2 { margin: 0; line-height: 0; color: var(--ink); }
+  .dm svg { display: block; height: 17px; width: auto; }
+  .count { font: 500 12px/1 var(--mono); padding: 5px 8px; border-radius: 999px; background: var(--ink); color: var(--page); }
+  .count:empty { display: none; }
+  .grow { flex: 1; }
+  .sub { font-size: 13px; font-weight: 600; color: var(--ink-2); margin: 22px 0 6px; }
+
+  ul.list { list-style: none; margin: 0; padding: 0; }
+  li.item { display: flex; align-items: center; gap: 14px; padding: 10px 0; min-height: 64px; border-top: 1px solid var(--line); }
+  li.item:first-child { border-top: 0; }
+  .itext { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .itext .t { font-weight: 500; }
+  .meta { font: 12.5px/1.45 var(--mono); color: var(--ink-2); margin-top: 2px; }
+  .meta .src { text-transform: uppercase; letter-spacing: .04em; }
+  .meta .late { color: var(--bad); }
+  .empty { color: var(--ink-2); padding: 12px 0; }
+  .chipled { width: 34px; height: 34px; flex: none; line-height: 0; }
+  .chipled svg { width: 100%; height: 100%; }
+  .glyph { display: inline-block; vertical-align: -1px; margin: 0 1px; line-height: 0; }
+  .glyph svg { height: 12px; width: auto; }
+  li.note.done .t { text-decoration: line-through; opacity: .55; }
+  .hit { display: grid; place-items: center; width: 44px; height: 44px; margin: -6px -6px -6px -8px; cursor: pointer; flex: none; }
+
+  /* controls */
+  button { font: inherit; }
+  .btn { appearance: none; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 20px;
+         border-radius: 999px; border: 1px solid var(--line-2); background: transparent; color: var(--ink); font-weight: 500;
+         cursor: pointer; white-space: nowrap; touch-action: manipulation; }
+  .btn:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 7%, transparent); }
+  .btn.primary { background: var(--ink); border-color: var(--ink); color: var(--page); }
+  .btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 86%, var(--page)); }
+  .btn.sm { min-height: 40px; padding: 0 15px; font-size: 14px; }
+  .btn.ghost { border-color: transparent; color: var(--ink-2); }
+  .btn:disabled { opacity: .38; cursor: default; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line-2); background: transparent;
+          color: var(--ink); font: 500 13.5px var(--mono); cursor: pointer; touch-action: manipulation; }
+  .chip.on { background: var(--ink); border-color: var(--ink); color: var(--page); }
+  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
+  .field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 500; color: var(--ink-2); min-width: 0; }
+  input[type=text], input[type=number], input[type=time], select {
+    font: 16px var(--sans); color: var(--ink); background: var(--field); border: 1px solid var(--line-2); border-radius: 12px;
+    min-height: 46px; padding: 0 14px; width: 100%; margin: 0; }
+  input::placeholder { color: var(--ink-3); }
+  input:focus, select:focus { border-color: var(--ink); outline: none; }
+  input:focus-visible, select:focus-visible { box-shadow: 0 0 0 1px var(--ink); }
+  .unit, .sel { position: relative; display: block; }
+  .unit input { padding-right: 52px; }
+  .unit i { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); font: 12.5px var(--mono); font-style: normal; color: var(--ink-2); pointer-events: none; }
+  .sel select { appearance: none; -webkit-appearance: none; padding-right: 38px; cursor: pointer; }
+  .sel::after { content: ""; position: absolute; right: 17px; top: 50%; width: 7px; height: 7px; border: solid var(--ink-2);
+                border-width: 0 1.5px 1.5px 0; transform: translateY(-70%) rotate(45deg); pointer-events: none; }
+  .sel.sw select { padding-left: 42px; }
+  .sel.sw i { position: absolute; left: 13px; top: 50%; width: 18px; height: 18px; margin-top: -9px; border-radius: 50%;
+              background: var(--glass); box-shadow: inset 0 0 0 4px var(--glass), inset 0 0 0 10px var(--c, transparent); pointer-events: none; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 18px; }
+  .actions.end { justify-content: flex-end; }
+  .hint { font-size: 13px; color: var(--ink-2); margin: 12px 0 0; max-width: 62ch; }
+  .tog { display: flex; align-items: center; gap: 12px; min-height: 44px; font-size: 15px; color: var(--ink); cursor: pointer; }
+  .tog.small { font-size: 14px; color: var(--ink-2); gap: 10px; }
+  input.switch { appearance: none; -webkit-appearance: none; position: relative; flex: none; width: 46px; height: 28px; margin: 0;
+                 border-radius: 999px; background: var(--ctl); cursor: pointer; transition: background .15s; }
+  input.switch::before { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%;
+                         background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); transition: transform .15s; }
+  input.switch:checked { background: var(--ink); }
+  input.switch:checked::before { transform: translateX(18px); background: radial-gradient(circle, var(--on) 0 3px, var(--page) 3.6px); }
+  input.check { appearance: none; -webkit-appearance: none; display: grid; place-items: center; width: 26px; height: 26px; margin: 0;
+                border-radius: 50%; border: 1.5px solid var(--ctl); background: transparent; cursor: pointer; }
+  input.check:checked { background: var(--ink); border-color: var(--ink); }
+  input.check:checked::after { content: ""; width: 6px; height: 11px; border: solid var(--page); border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg); }
+  .days { display: flex; gap: 5px; margin-top: 2px; max-width: 420px; }
+  .day { position: relative; flex: 1; }
+  .day input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+  .day span { display: flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 2px;
+              border: 1px solid var(--line-2); border-radius: 999px; font: 500 13px var(--mono); color: var(--ink-2); }
+  .day input:checked + span { background: var(--ink); border-color: var(--ink); color: var(--page); }
+  .day input:focus-visible + span { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .snooze { display: flex; align-items: center; gap: 10px; min-height: 28px; font-weight: 500; }
+  .snooze .cled.on { background: var(--on); } .snooze .cled.warn { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+
+  /* brightness: an LED bar */
+  .bright { display: flex; align-items: baseline; justify-content: space-between; font-size: 15px; font-weight: 500; }
+  .bright output { font: 500 14px var(--mono); color: var(--ink-2); }
+  input[type=range] { --pct: 50%; appearance: none; -webkit-appearance: none; width: 100%; height: 36px; margin: 4px 0 0; background: transparent; cursor: pointer; }
+  input[type=range]::-webkit-slider-runnable-track { height: 12px; border-radius: 999px;
+    background: repeating-linear-gradient(90deg, transparent 0 7px, var(--page) 7px 9px), linear-gradient(90deg, var(--ink) var(--pct), var(--line-2) var(--pct)); }
+  input[type=range]::-moz-range-track { height: 12px; border-radius: 999px;
+    background: repeating-linear-gradient(90deg, transparent 0 7px, var(--page) 7px 9px), linear-gradient(90deg, var(--ink) var(--pct), var(--line-2) var(--pct)); }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 28px; height: 28px; margin-top: -8px; border-radius: 50%;
+    background: var(--page); border: 2px solid var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+  input[type=range]::-moz-range-thumb { width: 24px; height: 24px; border-radius: 50%; background: var(--page); border: 2px solid var(--ink); }
+  .quiet { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 18px; align-items: center; margin-top: 6px; }
+  .quiet svg { width: 84px; height: 84px; display: block; }
+  .qtxt { font: 500 11px var(--mono); fill: var(--lit); }
+
+  /* send: a preview of the display line */
+  .strip { max-width: 440px; margin: 0 0 18px; line-height: 0; }
+  .strip svg { width: 100%; height: auto; }
+  .strip.ghost .pm { opacity: .4; }
+  .ptrack, .pring { fill: none; stroke-width: 6.5; stroke-linecap: round; stroke-dasharray: 0 1; }
+  .ptrack { stroke: rgba(255,255,255,.07); }
+  .pring.pulse { animation: pulse 1.8s ease-in-out infinite; }
+  .pring.chase { stroke-dasharray: 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 37; animation: chase 2.4s steps(48) infinite; }
+  @keyframes pulse { 50% { opacity: .18; } }
+  @keyframes chase { to { stroke-dashoffset: -48; } }
+  .icons { display: flex; gap: 6px; margin-top: 10px; overflow-x: auto; scrollbar-width: none; padding-right: 32px;
+           -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 40px), transparent); }
+  .icons::-webkit-scrollbar { display: none; }
+  .fields.half { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .fields.pick { grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); }
+  @media (hover: hover) and (pointer: fine) { .icons { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; padding-bottom: 8px; } }
+  .ichip { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 11px; border-radius: 999px; flex: none;
+           border: 1px solid var(--line); background: var(--field); color: var(--ink); font: 12.5px var(--mono); cursor: pointer; touch-action: manipulation; }
+  .ichip svg { height: 12px; width: auto; display: block; }
+
+  #toast { position: fixed; left: 50%; bottom: calc(22px + env(safe-area-inset-bottom)); z-index: 10; display: flex; align-items: center; gap: 10px;
+           max-width: calc(100vw - 32px); padding: 11px 18px 11px 15px; border-radius: 999px; background: var(--glass); color: var(--lit);
+           font: 500 14px var(--sans); box-shadow: 0 0 0 1px rgba(255,255,255,.1), 0 10px 30px -10px rgba(0,0,0,.5);
+           opacity: 0; transform: translate(-50%, 8px); transition: opacity .2s, transform .2s; pointer-events: none; }
+  #toast::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: #4fc47f; box-shadow: 0 0 8px #4fc47f; }
+  #toast.bad::before { background: #ef6b5d; box-shadow: 0 0 8px #ef6b5d; }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  @media (max-width: 760px) {
+    .wrap { padding: 6px 16px 56px; }
+    .top { min-height: 56px; }
+    .hero { grid-template-columns: clamp(124px, 41vw, 230px) minmax(0, 1fr); gap: 18px; padding: 10px 0 22px; }
+    .cname { font-size: 26px; }
+    .caddr { margin: 3px 0 8px; font-size: 11px; letter-spacing: 0; }
+    .facts li { min-height: 0; padding: 3px 0; gap: 9px; font-size: 14px; line-height: 1.3; border: 0 !important; }
+    .fg { width: 16px; height: 16px; }
+    .board { display: flex; flex-direction: column; }
+    .col { display: contents; }
+    .panel { padding: 22px 0 26px; }
+    .col:nth-child(2) > .panel:first-child { border-top: 1px solid var(--line); }
+    .icons { margin-right: -16px; }
+    .actions .btn.primary { flex: 1 1 auto; }
+    .btn.sm { padding: 0 12px; }
+  }
+  @media (max-width: 340px) {
+    .hero { grid-template-columns: 1fr; }
+    .face { width: 70%; margin: 0 auto; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pring.pulse, .pring.chase, .sweep.run { animation: none; }
+    *, *::before { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="2.6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glowSm" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="1.3" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <radialGradient id="gBody" cx="36%" cy="28%" r="85%"><stop offset="0" class="s-hi"/><stop offset="1" class="s-lo"/></radialGradient>
+    <radialGradient id="gGlass" cx="50%" cy="40%" r="62%"><stop offset="0" stop-color="#2b2e32"/><stop offset="1" stop-color="#16181b"/></radialGradient>
+  </defs>
+</svg>
+
+<div class="wrap">
+  <header class="top">
+    <h1 class="brand">
+      <svg class="mark" viewBox="-16 -16 32 32" aria-hidden="true"><circle r="15.5" fill="#0b0b0c"/><g fill="none" stroke-width="3.6"><path d="M0 -10A10 10 0 0 1 10 0" stroke="#ff8c00"/><path d="M8.7 5A10 10 0 0 1 -5 8.7" stroke="#40e0d0"/><path d="M-8.7 5A10 10 0 0 1 -8.7 -5" stroke="#32cd32"/></g></svg>
+      <span class="dm" data-dm="GLANCE">Glance Clock</span>
+    </h1>
+    <div class="clocks" id="clocks" role="group" aria-label="Clock"></div>
+  </header>
+
+  <section class="hero" aria-label="Clock status">
+    <figure class="face">
+      <svg id="faceSvg" viewBox="-200 -200 400 400" role="img" aria-label="Clock face">
+        <circle r="197" class="f-body"/>
+        <circle r="187" fill="url(#gGlass)" class="f-glass"/>
+        <path id="faceSheen" class="f-sheen"/>
+        <g id="faceLeds" filter="url(#glow)"></g>
+        <g class="hands-sh" transform="translate(1.4 2.4)"><line id="hhS" y2="-96" stroke-width="3.4"/><line id="mhS" y2="-133" stroke-width="2.5"/></g>
+        <line id="hh" class="hand" y2="-96" stroke-width="3.4"/>
+        <line id="mh" class="hand" y2="-133" stroke-width="2.5"/>
+        <circle r="6.5" class="hub"/>
+      </svg>
+    </figure>
+    <div class="readout">
+      <p class="cname" id="clockName">Glance Clock</p>
+      <p class="caddr" id="clockAddr"></p>
+      <ul class="facts">
+        <li><span class="fg"><svg viewBox="-10 -10 20 20" aria-hidden="true"><circle r="9.6" class="mr-glass"/><circle r="6.4" class="sweep" id="sweep" pathLength="100"/><circle r="3.2" id="dot" class="dot"/></svg></span><span id="conn">Checking…</span></li>
+        <li><span class="fg" id="gUnread"></span><span id="fUnread">Nothing unread</span></li>
+        <li><span class="fg" id="gCount"></span><span id="fCount">No countdown</span></li>
+        <li><span class="fg" id="gNudge"></span><span id="fNudge">Nudges</span></li>
+        <li><span class="fg" id="gQuiet"></span><span id="fQuiet">Quiet hours</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <div class="board">
+    <div class="col">
+      <section class="panel" id="secUnread" aria-labelledby="hUnread">
+        <div class="sh">
+          <h2 class="dm" id="hUnread" data-dm="UNREAD">Unread</h2><span class="count" id="count"></span>
+          <span class="grow"></span>
+          <button class="btn sm" id="clearAll">Clear all</button>
+        </div>
+        <ul class="list" id="unread"></ul>
+      </section>
+
+      <section class="panel" id="secNotes" aria-labelledby="hNotes">
+        <div class="sh">
+          <h2 class="dm" id="hNotes" data-dm="NOTES">Notes</h2><span class="count" id="noteCount"></span>
+          <span class="grow"></span>
+          <label class="tog small"><input type="checkbox" class="switch" id="showDone"> Show done</label>
+        </div>
+        <ul class="list" id="notes"></ul>
+        <div class="actions" style="flex-wrap:nowrap">
+          <input type="text" id="noteText" placeholder="Add a note" aria-label="New note" style="flex:1">
+          <button class="btn" id="addNote">Add</button>
+        </div>
+      </section>
+
+      <section class="panel" id="secPickup" aria-labelledby="hPickup">
+        <div class="sh"><h2 class="dm" id="hPickup" data-dm="PICKUP">Pickup</h2></div>
+        <div class="fields pick">
+          <label class="field">Who / what <input type="text" id="pName" maxlength="24" placeholder="Bob - Juno" autocomplete="off"></label>
+          <label class="field">When <input type="text" id="pWhen" placeholder="40m, 1h30, 2:30pm" autocomplete="off"></label>
+        </div>
+        <div class="actions">
+          <div class="chips"><button class="chip" data-when="15m">15 min</button><button class="chip" data-when="30m">30 min</button><button class="chip" data-when="1h">1 hour</button></div>
+          <span class="grow"></span>
+          <button class="btn primary" id="addPickup">Add pickup</button>
+        </div>
+        <p class="hint">Alerts now, 10 minutes before, and when due. Clear it from Unread when they've been.</p>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="panel" id="secNudges" aria-labelledby="hNudges">
+        <div class="sh"><h2 class="dm" id="hNudges" data-dm="FOCUS NUDGES">Focus nudges</h2></div>
+        <div class="snooze"><span class="cled" id="snoozeLed"></span><span id="snoozeState"></span></div>
+        <div class="actions" style="margin-top:12px">
+          <button class="btn sm" data-snooze="60">Snooze 1 hour</button><button class="btn sm" data-snooze="-1">Rest of today</button>
+          <button class="btn sm" data-snooze="0" id="unsnooze">Unsnooze</button>
+        </div>
+        <div class="sub">Breaks</div>
+        <label class="tog"><input type="checkbox" class="switch" id="nBreaks"> Break reminders</label>
+        <div class="fields" style="margin-top:6px">
+          <label class="field">After this many active minutes <span class="unit"><input type="number" id="nBreakMin" min="1" max="480"><i aria-hidden="true">min</i></span></label>
+          <label class="field">A pause this long counts as a break <span class="unit"><input type="number" id="nPauseMin" min="1" max="120"><i aria-hidden="true">min</i></span></label>
+        </div>
+        <div class="sub">Closing time</div>
+        <label class="tog"><input type="checkbox" class="switch" id="nClosingOn"> Closing time nudges</label>
+        <div class="fields half" style="margin-top:6px">
+          <label class="field">Closing at <input type="time" id="nClosing"></label>
+        </div>
+        <div class="field" style="margin-top:14px">On these days (none checked: every day)
+          <div class="days" id="nDays" role="group" aria-label="Closing days"></div>
+        </div>
+        <p class="hint">"Wrap up" 30 minutes before closing, "Closing time" at it. Timers, pickups and hard stops you set aren't affected by any of this.</p>
+        <div class="actions end"><button class="btn primary" id="saveNudges">Save nudges</button></div>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="panel" id="secSend" aria-labelledby="hSend">
+        <div class="sh"><h2 class="dm" id="hSend" data-dm="SEND TO CLOCK">Send to clock</h2></div>
+        <div class="strip ghost" id="strip" aria-hidden="true">
+          <svg viewBox="0 0 320 120">
+            <rect x=".5" y=".5" width="319" height="119" rx="59.5" class="f-body"/>
+            <rect x="7" y="7" width="306" height="106" rx="53" fill="url(#gGlass)"/>
+            <g filter="url(#glow)">
+              <rect x="15" y="15" width="290" height="90" rx="45" pathLength="48" class="ptrack"/>
+              <rect x="15" y="15" width="290" height="90" rx="45" pathLength="48" class="pring" id="prevRing"/>
+              <g class="pm" id="prevMatrix"></g>
+            </g>
+          </svg>
+        </div>
+        <label class="field">Text <span class="unit"><input type="text" id="text" maxlength="40" placeholder="{bell} BACK IN 5" autocomplete="off"><i id="textCount" aria-hidden="true">0/40</i></span></label>
+        <div class="icons" id="icons" role="group" aria-label="Insert an icon"></div>
+        <div class="fields" style="margin-top:14px">
+          <label class="field">Color <span class="sel sw"><i id="colorSw"></i><select id="color"></select></span></label>
+          <label class="field">Animation <span class="sel"><select id="anim"></select></span></label>
+          <label class="field">Sound <span class="sel"><select id="sound"></select></span></label>
+          <label class="field">Priority <span class="sel"><select id="priority"></select></span></label>
+        </div>
+        <div class="actions">
+          <label class="tog"><input type="checkbox" class="switch" id="keep"> Keep in unread</label>
+          <span class="grow"></span>
+          <button class="btn primary" id="send">Send</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="panel" id="secSettings" aria-labelledby="hSettings">
+        <div class="sh"><h2 class="dm" id="hSettings" data-dm="CLOCK SETTINGS">Clock settings</h2></div>
+        <label class="field" style="color:var(--ink)">
+          <span class="bright">Brightness <output id="bval"></output></span>
+          <input type="range" id="brightness" min="0" max="255" step="5">
+        </label>
+        <p class="hint" style="margin-top:4px">0 follows the light sensor (dim). Higher is a fixed level.</p>
+        <div style="margin-top:12px">
+          <label class="tog"><input type="checkbox" class="switch" id="night"> Night mode (dims, hides hour dots)</label>
+          <label class="tog"><input type="checkbox" class="switch" id="dnd"> Quiet hours</label>
+        </div>
+        <div class="quiet">
+          <svg id="quietDial" viewBox="-40 -40 80 80" aria-hidden="true"></svg>
+          <div class="fields">
+            <label class="field">Quiet from (hour) <input type="number" id="dndFrom" min="0" max="23"></label>
+            <label class="field">Quiet until (hour) <input type="number" id="dndTill" min="0" max="23"></label>
+          </div>
+        </div>
+        <p class="hint">During quiet hours only critical alerts show. Unread replays are silent and always show.</p>
+        <div class="actions end"><button class="btn primary" id="saveSettings">Save settings</button></div>
+      </section>
+    </div>
+  </div>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+const calm = matchMedia("(prefers-reduced-motion: reduce)");
+
+// ---- the clock's 5x7 dot-matrix font: one column per byte, bit 0 = top row ----
+const FONT = {};
+(" 0000000000|!00005F0000|\"0007000700|#147F147F14|$242A7F2A12|%2313086462|&3649552250|'0005030000|(001C224100|" +
+ ")0041221C00|*082A1C2A08|+08083E0808|,0050300000|-0808080808|.0060600000|/2010080402|03E4141413E|100427F4000|" +
+ "24261514946|32141454B31|41814127F10|52745454539|63C4A494930|70171090503|83649494936|9064949291E|:0036360000|" +
+ ";0056360000|<0814224100|=1414141414|>0041221408|?0201510906|@324979413E|A7E1111117E|B7F49494936|C3E41414122|" +
+ "D7F4141221C|E7F49494941|F7F09090901|G3E4149497A|H7F0808087F|I00417F4100|J2040413F01|K7F08142241|L7F40404040|" +
+ "M7F020C027F|N7F0408107F|O3E4141413E|P7F09090906|Q3E4151215E|R7F09192946|S4649494931|T01017F0101|U3F4040403F|" +
+ "V1F2040201F|W3F4038403F|X6314081463|Y0708700807|Z6151494543|[007F414100|]0041417F00|_4040404040|" +
+ "a2054545478|b7F48444438|c3844444420|d384444487F|e3854545418|f087E090102|g0C5252523E|h7F08040478|i00447D4000|" +
+ "j2040443D00|k7F10284400|l00417F4000|m7C04180478|n7C08040478|o3844444438|p7C14141408|q081414187C|r7C08040408|" +
+ "s4854545420|t043F444020|u3C4040207C|v1C2040201C|w3C4030403C|x4428102844|y0C5050503C|z4464544C44|" +
+ "\\0204081020|^0402010204|`0001020400|{0008364100|}0041360800|~1008081008")
+  .split("|").forEach(g => FONT[g[0]] = g.slice(1).match(/../g).map(h => parseInt(h, 16)));
+FONT["|"] = [0, 0, 127, 0, 0];
+// the built-in icons, drawn to match their names (the clock's own bitmaps aren't known)
+const ICON = {
+  house: [8, 124, 126, 15, 126, 124, 8], phone: [4, 54, 58, 58, 58, 54, 4], clock: [28, 34, 65, 77, 73, 34, 28],
+  plug: [12, 31, 124, 31, 12], smartphone: [127, 97, 65, 97, 127], sun: [73, 34, 28, 93, 28, 34, 73],
+  smiley: [28, 34, 85, 81, 85, 34, 28], block: [127, 127, 127, 127, 127], bat0: [62, 34, 34, 34, 34, 62, 8],
+  bat1: [62, 62, 34, 34, 34, 62, 8], bat2: [62, 62, 62, 34, 34, 62, 8], bat3: [62, 62, 62, 62, 62, 62, 8],
+  bellmute: [96, 28, 46, 119, 58, 62, 33], mute: [28, 62, 127, 0, 20, 8, 20], thermo: [62, 121, 62],
+  drop: [56, 126, 127, 126, 56], heart: [6, 15, 31, 62, 31, 15, 6], baro: [28, 34, 65, 73, 69, 34, 28],
+  in: [96, 68, 72, 95, 72, 68, 96], out: [96, 68, 66, 95, 66, 68, 96], umbrella: [4, 38, 71, 63, 7, 6, 4],
+  bell: [32, 60, 62, 127, 62, 60, 32], speaker: [28, 62, 127, 0, 34, 28], wind: [34, 42, 42, 42, 10, 8, 8],
+  cloud: [24, 28, 28, 30, 30, 28, 24], deg: [2, 5, 2],
+};
+const isIcon = name => Object.hasOwn(ICON, name.toLowerCase());
+
+function glyph(ch) {
+  if (ch === " ") return [0, 0];
+  const g = FONT[ch] || FONT[ch.toUpperCase()] || FONT["?"];
+  let a = 0, b = g.length;
+  while (a < b && !g[a]) a++;
+  while (b > a && !g[b - 1]) b--;
+  return g.slice(a, b);
+}
+
+function textCols(s) {  // text with {icon} names -> matrix columns
+  const cols = [];
+  for (const part of String(s).split(/(\{\w+\})/)) {
+    const m = part.match(/^\{(\w+)\}$/);
+    for (const g of m && isIcon(m[1]) ? [ICON[m[1].toLowerCase()]] : [...part].map(glyph)) {
+      if (cols.length) cols.push(0);
+      cols.push(...g);
+    }
+  }
+  return cols;
+}
+
+function dmSVG(text, pitch = 2.6, r = 1.05) {  // static dot-matrix text, lit dots only
+  const cols = textCols(text), w = Math.max(1, cols.length) * pitch, h = 7 * pitch;
+  let dots = "";
+  cols.forEach((c, x) => { for (let y = 0; y < 7; y++) if (c >> y & 1)
+    dots += `<circle cx="${((x + .5) * pitch).toFixed(2)}" cy="${((y + .5) * pitch).toFixed(2)}" r="${r}"/>`; });
+  return `<svg viewBox="0 0 ${w.toFixed(2)} ${h.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" fill="currentColor" aria-hidden="true">${dots}</svg>`;
+}
+
+function matrix(parent, x0, y0, pitch, r) {  // a live 32x8 matrix; returns show(cols, offset), offset null = centered
+  const dots = [];
+  for (let y = 0; y < 8; y++) for (let x = 0; x < 32; x++) {
+    const c = document.createElementNS(NS, "circle");
+    c.setAttribute("cx", (x0 + x * pitch).toFixed(2)); c.setAttribute("cy", (y0 + y * pitch).toFixed(2));
+    c.setAttribute("r", r); c.setAttribute("class", "px");
+    parent.appendChild(c); dots.push(c);
+  }
+  let last = "";
+  return (cols, offset = null) => {
+    const start = offset === null ? Math.floor((32 - cols.length) / 2) : -offset;
+    const shown = Array.from({ length: 32 }, (_, x) => cols[x - start] || 0);
+    const key = shown.join();
+    if (key === last) return;
+    last = key;
+    shown.forEach((c, x) => { for (let y = 0; y < 8; y++) dots[y * 32 + x].classList.toggle("on", !!(c >> y & 1)); });
+  };
+}
+
+// ---- LED colors: the clock's color names are CSS names; a few get brighter LED tones ----
+const LED_TONE = { Black: null, White: "#f4f1ea", LightSlateBlue: "#8470ff", Blue: "#2f5bff", Indigo: "#6b3fd6", DarkGreen: "#1f9a45", Maroon: "#b3343e",
+  DarkMagenta: "#b0249c", Brown: "#b5522f", Olive: "#a3a32c" };
+function led(name) {
+  if (!name) return "#a0a8b0";
+  if (name in LED_TONE) return LED_TONE[name];
+  return !/^google/i.test(name) && CSS.supports("color", name) ? name.toLowerCase() : "#a0a8b0";
+}
+
+// ---- ring geometry: angles in degrees clockwise from 12 o'clock ----
+const pt = (r, a) => [r * Math.sin(a * Math.PI / 180), -r * Math.cos(a * Math.PI / 180)];
+function arc(r, a0, a1) {
+  a1 = Math.min(a1, a0 + 359.9);
+  const [x0, y0] = pt(r, a0), [x1, y1] = pt(r, a1);
+  return `M${x0.toFixed(2)} ${y0.toFixed(2)}A${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+}
+function miniRing(parts) {  // a tiny clock face: [{a0, a1, c}] arcs on a ring
+  return `<svg viewBox="-10 -10 20 20" aria-hidden="true"><circle r="9.6" class="mr-glass"/><circle r="5.8" class="mr-track"/>` +
+    parts.map(p => `<path class="mr-arc" d="${arc(5.8, p.a0, p.a1)}" stroke="${p.c}"/>`).join("") + `</svg>`;
+}
+function ledChip(color) {  // a small glass face with three LEDs lit at 12 o'clock, for list rows
+  const c = led(color);
+  let s = `<svg viewBox="-17 -17 34 34" aria-hidden="true"><circle r="16.4" class="mr-glass"/><g filter="url(#glowSm)">`;
+  for (let i = 0; i < 12; i++) {
+    const [x, y] = pt(10.5, i * 30), lit = c && (i < 2 || i > 10);
+    s += `<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="2.3" fill="${lit ? c : "rgba(255,255,255,.09)"}"/>`;
+  }
+  return s + `</g></svg>`;
+}
+
+// ---- helpers (as before) ----
+function toast(msg, bad) { const t = $("toast"); t.textContent = msg; t.classList.toggle("bad", !!bad); t.classList.add("show");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2400); }
+
+let CLOCK = "";  // empty until status names the clocks; the bridge then uses its default
+try { CLOCK = localStorage.getItem("clock") || ""; } catch {}
+
+async function api(path, body) {
+  if (CLOCK && body !== undefined) body = { clock: CLOCK, ...body };
+  if (CLOCK && body === undefined) path += (path.includes("?") ? "&" : "?") + "clock=" + encodeURIComponent(CLOCK);
+  const opts = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const r = await fetch(path, opts);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(data.error || r.statusText); e.status = r.status; throw e; }
+  return data;
+}
+
+function fill(sel, values, chosen) {
+  sel.innerHTML = values.map(v => `<option${v === chosen ? " selected" : ""}>${v}</option>`).join("");
+}
+
+function ago(t) {
+  const m = Math.round((Date.now() / 1000 - t) / 60);
+  if (m < 1) return "just now"; if (m < 60) return m + " min ago";
+  const h = Math.round(m / 60); return h < 24 ? h + " h ago" : Math.round(h / 24) + " d ago";
+}
+
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+function richText(s) {  // text with {icon} names drawn as dot-matrix glyphs
+  return String(s).split(/(\{\w+\})/).map(p => /^\{\w+\}$/.test(p) && isIcon(p.slice(1, -1)) ? `<span class="glyph">${dmSVG(p, 1.75, .78)}</span>` : esc(p)).join("");
+}
+
+const clockTime = epoch => new Date(epoch * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+const hourName = h => new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: "numeric" });
+function span(sec) { const m = Math.max(1, Math.round(sec / 60)); return m < 60 ? m + " min" : Math.floor(m / 60) + " h" + (m % 60 ? " " + m % 60 + " min" : ""); }
+function mmss(sec) {
+  sec = Math.max(0, Math.ceil(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = String(sec % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
+}
+const inQuiet = (h, a, b) => a !== b && (a < b ? h >= a && h < b : h >= a || h < b);
+
+// what the panel knows, for the drawing and the readout
+const S = { bridge: null, status: null, unread: [], settings: null, nudges: null };
+
+// ---- the clock face, measured from photos of the real one (radius 197 = bezel edge), outside in:
+// 12 hour dots in the margin; four contiguous bands of 48 near-square cells from r 170 in to r 97.6, ring 0 outermost;
+// the 32x8 display (43% of the diameter wide) just below the centre pin; real hands on top ----
+const RING_OUT = 170, RING_DEPTH = 18.1, RINGS = [0, 1, 2, 3];
+const DAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const KIND = { pickup: "Pickup", timer: "Timer", stop: "Hard stop" };
+const RING_FROM = { pickup: 10, timer: null, stop: 30 };  // minutes before due the ring starts, as in pickups.py
+const TIMER_COLOR = "#e8eefc";  // the clock's Timer has no colour field; its firmware colour isn't confirmed yet
+const faceLeds = RINGS.map(() => []), faceKey = RINGS.map(() => Array(48).fill("")), hourDots = [];
+let faceMatrix;
+(function buildFace() {
+  const g = $("faceLeds");
+  const dot = (r, a, size, cls) => {
+    const [x, y] = pt(r, a), c = document.createElementNS(NS, "circle");
+    c.setAttribute("cx", x.toFixed(2)); c.setAttribute("cy", y.toFixed(2)); c.setAttribute("r", size.toFixed(2)); c.setAttribute("class", cls);
+    return g.appendChild(c);
+  };
+  for (let h = 0; h < 12; h++) hourDots.push(dot(178, h * 30, 3.6, "hdot"));
+  RINGS.forEach(k => {  // LED 0 starts at 12 o'clock and runs clockwise; thin seams between cells
+    const ro = RING_OUT - k * RING_DEPTH - .6, ri = RING_OUT - (k + 1) * RING_DEPTH + .6, f = n => n.toFixed(2);
+    for (let i = 0; i < 48; i++) {
+      const a0 = i * 7.5 + .35, a1 = (i + 1) * 7.5 - .35, [x0, y0] = pt(ro, a0), [x1, y1] = pt(ro, a1), [x2, y2] = pt(ri, a1), [x3, y3] = pt(ri, a0);
+      const c = document.createElementNS(NS, "path");
+      c.setAttribute("d", `M${f(x0)} ${f(y0)}A${f(ro)} ${f(ro)} 0 0 1 ${f(x1)} ${f(y1)}L${f(x2)} ${f(y2)}A${f(ri)} ${f(ri)} 0 0 0 ${f(x3)} ${f(y3)}Z`);
+      c.setAttribute("class", "led");
+      faceLeds[k].push(g.appendChild(c));
+    }
+  });
+  faceMatrix = matrix(g.appendChild(document.createElementNS(NS, "g")), -82.9, 15.9, 5.35, 2);
+  $("faceSheen").setAttribute("d", arc(182, -66, -18));
+})();
+
+function setLed(k, i, v) {  // v: null (off) or [color, opacity]
+  const key = v ? v[0] + v[1].toFixed(2) : "";
+  if (faceKey[k][i] === key) return;
+  faceKey[k][i] = key;
+  faceLeds[k][i].style.fill = v ? v[0] : "";
+  faceLeds[k][i].style.fillOpacity = v ? v[1] : "";
+}
+
+function countdown(now) {  // the soonest countdown, which is the one on the clock's ring
+  const t = now / 1000;
+  const it = S.unread.filter(i => (i.ring_due || 0) > t).sort((a, b) => a.ring_due - b.ring_due)[0];
+  if (!it) return null;
+  const from = RING_FROM[it.kind];
+  const start = it.ring_start || Math.max(it.time, from ? it.ring_due - from * 60 : it.time);
+  const left = it.ring_due - t;
+  return { item: it, left, frac: Math.min(1, left / Math.max(1, it.ring_due - start)), color: TIMER_COLOR };
+}
+const itemLabel = it => KIND[it.kind] ? [KIND[it.kind], it.name].filter(Boolean).join(" · ") : it.ring_text || it.name || "Countdown";
+
+function drawFace(now = Date.now()) {
+  const link = !!(S.bridge && S.status && S.status.connected);
+  const L = RINGS.map(() => Array(48).fill(null));
+  const cd = link ? countdown(now) : null;
+  if (link) {
+    const n = S.unread.length, step = 48 / Math.max(1, n), len = Math.max(1, Math.min(8, Math.floor(step) - 2));
+    S.unread.forEach((it, k) => {
+      const c = led(it.color), s = Math.round(k * step - len / 2);
+      if (c) for (let j = 0; j < len; j++) L[0][(s + j + 48) % 48] = [c, 1];
+    });
+    if (cd) {
+      const lit = cd.frac * 48;
+      for (let i = 0; i < Math.ceil(lit); i++) L[1][i] = L[2][i] = L[3][i] = [cd.color, i < Math.floor(lit) ? 1 : .2 + .8 * (lit % 1)];
+    }
+  }
+  L.forEach((ring, k) => ring.forEach((v, i) => setLed(k, i, v)));
+  const s = S.settings, d = new Date(now);
+  hourDots.forEach(e => e.style.display = s && s.night_mode ? "none" : "");  // night mode hides them, as on the clock
+  faceMatrix(textCols(`${DAY[d.getDay()]} ${d.getDate()}`));
+  const m = d.getMinutes() + d.getSeconds() / 60, ha = `rotate(${((d.getHours() % 12 + m / 60) * 30).toFixed(2)})`, ma = `rotate(${(m * 6).toFixed(2)})`;
+  ["hh", "hhS"].forEach(id => $(id).setAttribute("transform", ha));
+  ["mh", "mhS"].forEach(id => $(id).setAttribute("transform", ma));
+  let level = s ? (s.brightness === 0 ? .78 : .55 + .45 * s.brightness / 255) * (s.night_mode ? .65 : 1) : 1;
+  $("faceLeds").style.opacity = link ? level : .45;
+  const say = [S.status ? S.status.name + " clock" : "Clock", d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }), $("conn").textContent.toLowerCase(),
+    S.unread.length + " unread", cd ? itemLabel(cd.item) + ", " + span(cd.left) + " left" : ""].filter(Boolean).join(", ");
+  if ($("faceSvg").getAttribute("aria-label") !== say) $("faceSvg").setAttribute("aria-label", say);
+}
+
+function setText(id, text, cls = "") { const e = $(id); if (e.textContent !== text) e.textContent = text; e.className = cls; }
+function setGlyph(id, html) { const e = $(id); if (e._html !== html) { e._html = html; e.innerHTML = html; } }
+
+function renderFacts(now = Date.now()) {
+  const t = now / 1000, n = S.unread.length;
+  setText("fUnread", n ? `${n} unread` : "Nothing unread");
+  const shown = Math.min(n, 24), step = 360 / Math.max(1, shown), w = Math.max(5, Math.min(60, step - 10));
+  setGlyph("gUnread", miniRing(S.unread.slice(0, shown).map((it, k) => ({ a0: k * step - w / 2, a1: k * step + w / 2, c: led(it.color) || "transparent" }))));
+
+  const cd = countdown(now);
+  if (cd) {
+    setText("fCount", `${itemLabel(cd.item)} · ${mmss(cd.left)} left`);
+    setGlyph("gCount", miniRing([{ a0: 0, a1: Math.max(4, Math.round(cd.frac * 72) * 5), c: cd.color }]));
+  } else {
+    const due = S.unread.filter(i => i.due).sort((a, b) => a.due - b.due);
+    const next = due.find(i => i.due > t), late = due.filter(i => i.due <= t).pop();
+    if (next) setText("fCount", `${itemLabel(next)} at ${clockTime(next.due)}`);
+    else if (late) setText("fCount", `${itemLabel(late)} was due ${clockTime(late.due)}`, "bad");
+    else setText("fCount", "No countdown");
+    setGlyph("gCount", miniRing(next ? [{ a0: -3, a1: 3, c: led(next.color) || "#40e0d0" }] : late ? [{ a0: 0, a1: 360, c: "#ef6b5d" }] : []));
+  }
+
+  const nd = S.nudges;
+  if (nd) {
+    const until = nd.snooze_until * 1000, closing = nd.closing ? clockTime(new Date(`2000-01-01T${nd.closing}`) / 1000) : "";
+    const on = [nd.breaks && `Break nudge after ${nd.break_minutes} min`, closing && `closing ${closing}`].filter(Boolean);
+    if (until > now) setText("fNudge", "Nudges snoozed until " + new Date(until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
+    else setText("fNudge", on.length ? on.join(" · ").replace(/^c/, "C") : "Nudges off");
+    setGlyph("gNudge", miniRing(until > now ? [{ a0: 0, a1: 140, c: "#e5a54a" }] : on.length ? [{ a0: 0, a1: 360, c: "#4fc47f" }] : []));
+  }
+
+  const s = S.settings;
+  if (s) {
+    const now_q = s.dnd && inQuiet(new Date(now).getHours(), s.dnd_from, s.dnd_till);
+    setText("fQuiet", (s.dnd ? `Quiet ${hourName(s.dnd_from)}–${hourName(s.dnd_till)}${now_q ? " · now" : ""}` : "Quiet hours off") + (s.night_mode ? " · night mode" : ""));
+    const a = s.dnd_from * 15, b = (s.dnd_till < s.dnd_from ? s.dnd_till + 24 : s.dnd_till) * 15;
+    setGlyph("gQuiet", miniRing(s.dnd && b > a ? [{ a0: a, a1: b, c: now_q ? "#6495ed" : "rgba(100,149,237,.5)" }] : []));
+  }
+}
+
+function updateDues(now = Date.now()) {
+  document.querySelectorAll("[data-due]").forEach(e => {
+    const left = +e.dataset.due - now / 1000;
+    const text = `due ${clockTime(+e.dataset.due)} · ` + (left > 0 ? "in " + span(left) : span(-left) + " ago");
+    if (e.textContent !== text) e.textContent = text;
+    e.classList.toggle("late", left <= 0);
+  });
+}
+
+function sweep() { const e = $("sweep"); e.classList.remove("run"); e.getBoundingClientRect(); e.classList.add("run"); }
+
+// ---- clock picker ----
+function renderClocks(list) {
+  const box = $("clocks"), names = list.map(c => c.name).join("\n");
+  if (box.dataset.names !== names) {
+    box.dataset.names = names;
+    box.innerHTML = list.map(c => `<button type="button" class="cchip" data-clock="${esc(c.name)}"><span class="cled"></span><span class="cn">${esc(c.name)}</span><span class="cc"></span></button>`).join("");
+  }
+  list.forEach((c, k) => {
+    const b = box.children[k];
+    b.setAttribute("aria-pressed", c.name === CLOCK);
+    b.querySelector(".cled").className = "cled " + (c.connected ? "on" : "off");
+    b.querySelector(".cc").textContent = c.unread || "";
+    b.title = `${c.name}: ${c.connected ? "connected" : "not connected"}, ${c.unread} unread`;
+  });
+}
+
+$("clocks").addEventListener("click", e => {
+  const b = e.target.closest("[data-clock]");
+  if (!b || b.dataset.clock === CLOCK) return;
+  CLOCK = b.dataset.clock;
+  try { localStorage.setItem("clock", CLOCK); } catch {}
+  $("clocks").querySelectorAll("[data-clock]").forEach(x => x.setAttribute("aria-pressed", x === b));
+  loadStatus(); loadUnread(); loadSettings(); loadNudges();
+});
+
+async function loadStatus() {
+  try {
+    let s;
+    try { s = await api("/status"); }
+    catch (e) { if (e.status !== 400 || !CLOCK) throw e; CLOCK = ""; s = await api("/status"); }  // a remembered clock that's gone
+    const names = s.clocks.map(c => c.name);
+    if (!names.includes(CLOCK)) CLOCK = s.name;
+    S.bridge = true; S.status = s;
+    renderClocks(s.clocks);
+    $("dot").setAttribute("class", "dot " + (s.connected ? "on" : "off"));
+    $("conn").textContent = s.connected ? "Connected" : "Clock not connected";
+    $("clockName").textContent = s.name; $("clockAddr").textContent = s.addr;
+  } catch {
+    S.bridge = false;
+    $("dot").setAttribute("class", "dot off"); $("conn").textContent = "Bridge not running";
+    $("clocks").querySelectorAll(".cled").forEach(e => e.className = "cled");  // last known; can't tell now
+  }
+  document.querySelector(".readout").classList.toggle("stale", !S.bridge);
+  sweep(); renderFacts(); drawFace();
+}
+
+async function loadUnread() {
+  const items = await api("/unread").catch(() => []);
+  S.unread = items;
+  $("count").textContent = items.length || "";
+  $("clearAll").disabled = !items.length;
+  $("unread").innerHTML = items.length ? items.slice().reverse().map(i => `
+    <li class="item">
+      <span class="chipled">${ledChip(i.color)}</span>
+      <div class="itext"><div class="t">${richText(i.text)}</div>
+        <div class="meta"><span class="src">${esc(i.source)}</span> · ${ago(i.time)}${i.due ? ` · <span data-due="${+i.due}"></span>` : ""}</div></div>
+      <button class="btn sm" data-id="${esc(i.id)}" aria-label="Clear: ${esc(i.text)}">Clear</button>
+    </li>`).join("") : `<li class="empty">Nothing unread.</li>`;
+  updateDues(); renderFacts(); drawFace();
+}
+
+async function loadSettings() {
+  try {
+    const s = await api("/settings");
+    S.settings = s;
+    $("brightness").value = s.brightness; showBrightness();
+    $("night").checked = s.night_mode; $("dnd").checked = s.dnd;
+    $("dndFrom").value = s.dnd_from; $("dndTill").value = s.dnd_till;
+    drawQuiet(); renderFacts(); drawFace();
+  } catch (e) { S.settings = null; setText("fQuiet", "Settings unknown"); setGlyph("gQuiet", miniRing([])); drawFace(); toast("Couldn't read settings: " + e.message, true); }
+}
+
+async function loadOptions() {
+  try {
+    const o = await api("/options");
+    fill($("color"), o.colors, "Lime"); fill($("anim"), o.animations, "Pulse");
+    fill($("sound"), o.sounds, "NoneSound"); fill($("priority"), o.priorities, "high");
+    $("icons").innerHTML = o.icons.map(i => `<button type="button" class="ichip" data-icon="${esc(i)}" title="Insert {${esc(i)}}">${dmSVG(`{${i}}`, 1.75, .78)}<span>${esc(i)}</span></button>`).join("");
+    looks();
+  } catch (e) { toast("Couldn't read options: " + e.message, true); }
+}
+
+$("unread").addEventListener("click", async e => {
+  const b = e.target.closest("[data-id]"); if (!b) return;
+  try { await api("/unread/clear", { id: b.dataset.id }); } catch (err) { toast("Not cleared: " + err.message, true); }
+  loadUnread();
+});
+$("clearAll").onclick = async () => {
+  try { await api("/unread/clear", {}); } catch (err) { toast("Not cleared: " + err.message, true); }
+  loadUnread();
+};
+
+// ---- send, with a live preview of the display line ----
+const showPreview = matrix($("prevMatrix"), 51.5, 39, 7, 2.6);
+const CHASE = /^(Wave|Wheel|Fan|Flower2?|Sun)$/;
+let marquee = 0;
+
+function preview() {
+  const text = $("text").value, cols = textCols(text || $("text").placeholder);
+  $("strip").classList.toggle("ghost", !text);
+  $("textCount").textContent = `${text.length}/${$("text").maxLength}`;
+  cancelAnimationFrame(marquee);
+  if (cols.length <= 32) return showPreview(cols);
+  if (calm.matches) return showPreview(cols, 0);
+  const extra = cols.length - 32, rate = 14, cycle = 1.2 + extra / rate + 1.2, t0 = performance.now();
+  const step = t => {  // hold, scroll to the end, hold, start over
+    const p = ((t - t0) / 1000) % cycle;
+    showPreview(cols, p < 1.2 ? 0 : Math.min(extra, Math.floor((p - 1.2) * rate)));
+    marquee = requestAnimationFrame(step);
+  };
+  marquee = requestAnimationFrame(step);
+}
+
+function looks() {
+  const c = led($("color").value), a = $("anim").value;
+  $("colorSw").style.setProperty("--c", c || "transparent");
+  $("prevRing").style.stroke = c || "transparent";
+  $("prevRing").setAttribute("class", "pring" + (a === "NoneAnimation" ? "" : CHASE.test(a) ? " chase" : " pulse"));
+}
+
+$("text").addEventListener("input", preview);
+$("color").addEventListener("change", looks);
+$("anim").addEventListener("change", looks);
+$("icons").addEventListener("click", e => {
+  const b = e.target.closest("[data-icon]"); if (!b) return;
+  const t = $("text"), token = `{${b.dataset.icon}}`;
+  const a = t.selectionStart ?? t.value.length, z = t.selectionEnd ?? a;
+  const value = t.value.slice(0, a) + token + t.value.slice(z);
+  if (value.length > t.maxLength) return toast("No room for another icon", true);
+  t.value = value;
+  try { t.setSelectionRange(a + token.length, a + token.length); } catch {}
+  preview();
+});
+
+$("send").onclick = async () => {
+  const text = $("text").value.trim(); if (!text) return toast("Type some text first", true);
+  try {
+    await api("/notify", { text, color: $("color").value, anim: $("anim").value, sound: $("sound").value,
+      priority: $("priority").value, keep: $("keep").checked, source: "panel" });
+    toast("Sent"); loadUnread();
+  } catch (e) { toast("Not sent: " + e.message, true); }
+};
+
+// ---- pickup ----
+function markWhen() { document.querySelectorAll("[data-when]").forEach(b => b.classList.toggle("on", b.dataset.when === $("pWhen").value.trim())); }
+document.querySelectorAll("[data-when]").forEach(b => b.onclick = () => { $("pWhen").value = b.dataset.when; markWhen(); });
+$("pWhen").addEventListener("input", markWhen);
+$("addPickup").onclick = async () => {
+  const name = $("pName").value.trim(), when = $("pWhen").value.trim();
+  if (!name || !when) return toast("Fill in who and when", true);
+  try {
+    const item = await api("/pickup", { name, when });
+    toast(item.text.replace(/^PICKUP /, "Pickup: ")); $("pName").value = ""; $("pWhen").value = ""; markWhen(); loadUnread();
+  } catch (e) { toast("Not added: " + e.message, true); }
+};
+
+// ---- clock settings ----
+function showBrightness() {
+  const v = +$("brightness").value;
+  $("bval").textContent = v ? v : "0 · auto";
+  $("brightness").style.setProperty("--pct", (v / 255 * 100).toFixed(1) + "%");
+}
+function drawQuiet() {
+  const a = parseInt($("dndFrom").value), b = parseInt($("dndTill").value), on = $("dnd").checked, h = new Date().getHours();
+  let s = `<circle r="39.4" class="mr-glass"/>`;
+  for (let i = 0; i < 24; i++) {
+    const lit = !isNaN(a) && !isNaN(b) && inQuiet(i, a, b), [x, y] = pt(30, i * 15 + 7.5);
+    s += `<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="3.2" fill="${lit ? (on ? "#6495ed" : "rgba(100,149,237,.32)") : "rgba(255,255,255,.08)"}"/>`;
+  }
+  const [x, y] = pt(21.5, h * 15 + 7.5);
+  s += `<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="2" fill="#f6f1e7"/>`;
+  if (!isNaN(a) && !isNaN(b)) s += `<text class="qtxt" y="4" text-anchor="middle"${on ? "" : ' opacity=".45"'}>${(b - a + 24) % 24}h</text>`;
+  $("quietDial").innerHTML = s;
+}
+$("brightness").oninput = showBrightness;
+["dndFrom", "dndTill", "dnd"].forEach(id => $(id).addEventListener("input", drawQuiet));
+$("saveSettings").onclick = async () => {
+  try {
+    await api("/settings", { brightness: +$("brightness").value, night_mode: $("night").checked,
+      dnd: $("dnd").checked, dnd_from: +$("dndFrom").value, dnd_till: +$("dndTill").value });
+    toast("Settings saved"); loadSettings();
+  } catch (e) { toast("Not saved: " + e.message, true); }
+};
+
+// ---- notes ----
+async function loadNotes() {
+  const all = await api("/notes").catch(() => []);
+  const open = all.filter(n => !n.done);
+  const shown = ($("showDone").checked ? all : open).slice().reverse();
+  $("noteCount").textContent = open.length || "";
+  $("notes").innerHTML = shown.length ? shown.map(n => `
+    <li class="item note${n.done ? " done" : ""}">
+      <label class="hit"><input type="checkbox" class="check" data-note="${esc(n.id)}" ${n.done ? "checked" : ""} aria-label="Done: ${esc(n.text)}"></label>
+      <div class="itext"><div class="t">${esc(n.text)}</div><div class="meta">${ago(n.time)}</div></div>
+      <button class="btn sm ghost" data-del="${esc(n.id)}" aria-label="Delete note: ${esc(n.text)}">Delete</button>
+    </li>`).join("") : `<li class="empty">No notes. Say "hey glance, note: …"</li>`;
+}
+$("notes").addEventListener("change", async e => {
+  if (e.target.dataset.note) {
+    try { await api("/notes", { id: e.target.dataset.note, done: e.target.checked }); } catch (err) { toast("Not changed: " + err.message, true); }
+    loadNotes();
+  }
+});
+$("notes").addEventListener("click", async e => {
+  const b = e.target.closest("[data-del]");
+  if (b) {
+    try { await api("/notes", { id: b.dataset.del, delete: true }); } catch (err) { toast("Not deleted: " + err.message, true); }
+    loadNotes();
+  }
+});
+$("showDone").onchange = loadNotes;
+$("addNote").onclick = async () => {
+  const text = $("noteText").value.trim(); if (!text) return;
+  try { await api("/notes", { text }); $("noteText").value = ""; } catch (err) { toast("Not added: " + err.message, true); }
+  loadNotes();
+};
+$("noteText").addEventListener("keydown", e => { if (e.key === "Enter") $("addNote").click(); });
+
+// ---- focus nudges ----
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+$("nDays").innerHTML = DAYS.map(d => `<label class="day"><input type="checkbox" value="${d}"><span>${d}</span></label>`).join("");
+let lastClosing = "18:00";
+
+function showNudges(n) {
+  $("nBreaks").checked = n.breaks; $("nBreakMin").value = n.break_minutes; $("nPauseMin").value = n.pause_minutes;
+  $("nClosingOn").checked = !!n.closing; if (n.closing) lastClosing = n.closing; $("nClosing").value = n.closing || lastClosing;
+  $("nDays").querySelectorAll("input").forEach(b => b.checked = n.closing_days.includes(b.value));
+  showSnooze(n);
+}
+
+function showSnooze(n) {
+  S.nudges = n;
+  const until = n.snooze_until * 1000;
+  $("snoozeState").textContent = until > Date.now()
+    ? "Snoozed until " + new Date(until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Nudges are on";
+  $("snoozeLed").className = "cled " + (until > Date.now() ? "warn" : "on");
+  $("unsnooze").disabled = until <= Date.now();
+  renderFacts();
+}
+
+async function loadNudges() {
+  try { showNudges(await api("/nudges")); } catch (e) { toast("Couldn't read nudges: " + e.message, true); }
+}
+
+document.querySelectorAll("[data-snooze]").forEach(b => b.onclick = async () => {
+  try { showNudges(await api("/nudges", { snooze_minutes: +b.dataset.snooze })); toast(b.textContent); }
+  catch (e) { toast("Not changed: " + e.message, true); }
+});
+
+$("saveNudges").onclick = async () => {
+  try {
+    showNudges(await api("/nudges", {
+      breaks: $("nBreaks").checked, break_minutes: +$("nBreakMin").value, pause_minutes: +$("nPauseMin").value,
+      closing: $("nClosingOn").checked ? $("nClosing").value : "",
+      closing_days: [...$("nDays").querySelectorAll("input:checked")].map(b => b.value),
+    }));
+    toast("Nudges saved");
+  } catch (e) { toast("Not saved: " + e.message, true); }
+};
+
+// ---- start ----
+document.querySelectorAll("[data-dm]").forEach(h => h.innerHTML = dmSVG(h.dataset.dm) + `<span class="sr">${esc(h.textContent)}</span>`);
+showBrightness(); drawQuiet(); preview(); drawFace();
+loadOptions(); loadNotes(); loadStatus().then(() => { loadUnread(); loadSettings(); loadNudges(); });
+setInterval(() => { loadStatus(); loadUnread(); loadNotes(); api("/nudges").then(showSnooze).catch(() => {}); }, 10000);
+let shownHour = new Date().getHours();
+setInterval(() => {
+  drawFace(); renderFacts(); updateDues();
+  if (new Date().getHours() !== shownHour) { shownHour = new Date().getHours(); drawQuiet(); }
+}, 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { loadStatus(); loadUnread(); loadNotes(); } });
+</script>
+</body>
+</html>

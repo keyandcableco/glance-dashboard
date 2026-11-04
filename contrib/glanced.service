@@ -1,0 +1,11 @@
+[Unit]
+Description=Glance Clock bridge (BLE link, time sync, alerts and panel on port 8740)
+
+[Service]
+WorkingDirectory=%h/glance-clock
+ExecStart=%h/glance-clock/.venv/bin/python %h/glance-clock/glanced.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,42 @@
+# Copy to config.toml and fill in. config.toml is git-ignored.
+# The first clock listed is the default for anything that doesn't name one.
+
+port = 8740
+
+# Optional: a shop app with a clock in/out API (GET /api/clock, POST /api/clock/toggle),
+# for "hey glance, clock me in".
+# [shop_app]
+# url = "http://192.168.1.50:8001"
+
+[clocks.office]
+address = "AA:BB:CC:DD:EE:FF"   # bluetoothctl devices, after pairing (see README)
+
+# Optional: alert on emails in a Thunderbird inbox (its local mbox file).
+[clocks.office.mail]
+inbox = "~/.thunderbird/xxxxxxxx.default-release/ImapMail/imap.example.com/INBOX"
+sender = "no-reply@example.com"
+rules = [
+  # match = a regex on the subject; its first group, if any, is shown after the label
+  { match = '^New order \S+ from (.+)', label = "ORDER", color = "Lime", anim = "Pulse", sound = "Bells" },
+  { match = '^New Service Request from (.+)', label = "REQUEST", color = "RoyalBlue", anim = "Wave", sound = "Radar" },
+]
+
+# Optional: alert on desktop notifications (e.g. Google Messages for Web) whose title has one of these names.
+[clocks.office.texts]
+names = ["Alex"]
+
+# Optional: warnings before Google Calendar events. Put the calendar's
+# "Secret address in iCal format" in this file (one line, git-ignored).
+[clocks.office.calendar]
+url_file = "calendar_url"
+
+# Optional: hyperfocus nudges (the panel can change these later).
+[clocks.office.nudges]
+break_minutes = 75
+pause_minutes = 10
+# closing = "18:00"
+# closing_days = ["Mon", "Tue", "Wed", "Thu", "Fri"]
+
+# A second clock with nothing but what you send it.
+# [clocks.kitchen]
+# address = "11:22:33:44:55:66"

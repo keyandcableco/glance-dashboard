@@ -1,0 +1,18 @@
+# Your setup: never commit these
+config.toml
+panel_password
+anthropic_api_key
+calendar_url
+
+# State the bridge keeps
+unread-*.json
+calendar_fired-*.json
+nudges-*.json
+notes.json
+*.tmp
+
+# Local
+.venv/
+__pycache__/
+upstream/
+old-experiments/

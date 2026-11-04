@@ -1,0 +1,9 @@
+#!/bin/sh
+#Put a pickup on the Glance Clock: pickup "Bob - Juno" 40m [clock]   (or 1h30, 2:30pm, 14:30)
+#Without a clock name it goes to the first clock in config.toml.
+[ $# -ge 2 ] || { echo 'usage: pickup "name" 40m|1h30|2:30pm [clock]' >&2; exit 2; }
+name=$(printf '%s' "$1" | sed 's/["\\]//g')
+when=$(printf '%s' "$2" | sed 's/["\\]//g')
+clock=$(printf '%s' "${3:-}" | sed 's/["\\]//g')
+curl -s -XPOST "${GLANCE_URL:-http://127.0.0.1:8740}/pickup" -d "{\"name\":\"$name\",\"when\":\"$when\"${clock:+,\"clock\":\"$clock\"}}"
+echo
