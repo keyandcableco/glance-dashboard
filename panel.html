@@ -134,9 +134,11 @@
   input[type=text], input[type=number], input[type=time], select {
     font: 16px var(--sans); color: var(--ink); background: var(--field); border: 1px solid var(--line-2); border-radius: 12px;
     min-height: 46px; padding: 0 14px; width: 100%; margin: 0; }
-  input::placeholder { color: var(--ink-3); }
-  input:focus, select:focus { border-color: var(--ink); outline: none; }
-  input:focus-visible, select:focus-visible { box-shadow: 0 0 0 1px var(--ink); }
+  textarea { font: 15px/1.6 var(--mono); color: var(--ink); background: var(--field); border: 1px solid var(--line-2);
+             border-radius: 12px; padding: 10px 14px; width: 100%; margin: 0; resize: vertical; }
+  input::placeholder, textarea::placeholder { color: var(--ink-3); }
+  input:focus, select:focus, textarea:focus { border-color: var(--ink); outline: none; }
+  input:focus-visible, select:focus-visible, textarea:focus-visible { box-shadow: 0 0 0 1px var(--ink); }
   .unit, .sel { position: relative; display: block; }
   .unit input { padding-right: 52px; }
   .unit i { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); font: 12.5px var(--mono); font-style: normal; color: var(--ink-2); pointer-events: none; }
@@ -327,6 +329,27 @@
           <button class="btn primary" id="addPickup">Add pickup</button>
         </div>
         <p class="hint">Alerts now, 10 minutes before, and when due. Clear it from Unread when they've been.</p>
+      </section>
+
+      <section class="panel" id="secStages" aria-labelledby="hStages">
+        <div class="sh"><h2 class="dm" id="hStages" data-dm="STAGES">Staged timer</h2></div>
+        <div class="chips" id="stagePresets">
+          <button class="chip" data-preset="focus25">Focus 25/5</button><button class="chip" data-preset="focus50">Focus 50/10</button>
+          <button class="chip" data-preset="caps">Cap reform</button><button class="chip" data-preset="glue">Glue-up</button>
+          <button class="chip" data-preset="burnin">Burn-in</button>
+        </div>
+        <div class="fields pick" style="margin-top:12px">
+          <label class="field">Name <input type="text" id="sName" maxlength="24" placeholder="CAPS" autocomplete="off"></label>
+          <label class="field">Repeat <input type="number" id="sRepeat" min="1" max="12" value="1"></label>
+        </div>
+        <label class="field" style="margin-top:10px">Stages, one per line: label, then minutes
+          <textarea id="sStages" rows="4" placeholder="50V 15&#10;75V 15&#10;100V 15&#10;120V 15" spellcheck="false"></textarea>
+        </label>
+        <div class="actions">
+          <span class="grow"></span>
+          <button class="btn primary" id="startStages">Start</button>
+        </div>
+        <p class="hint">Runs on the clock's own timer: the ring counts down each stage and the text line shows its label. Or say "hey glance, focus".</p>
       </section>
     </div>
 
@@ -577,8 +600,8 @@ const S = { bridge: null, status: null, unread: [], settings: null, nudges: null
 // the 32x8 display (43% of the diameter wide) just below the centre pin; real hands on top ----
 const RING_OUT = 170, RING_DEPTH = 18.1, RINGS = [0, 1, 2, 3];
 const DAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const KIND = { pickup: "Pickup", timer: "Timer", stop: "Hard stop" };
-const RING_FROM = { pickup: 10, timer: null, stop: 30 };  // minutes before due the ring starts, as in pickups.py
+const KIND = { pickup: "Pickup", timer: "Timer", stop: "Hard stop", stages: "Staged timer" };
+const RING_FROM = { pickup: 10, timer: null, stop: 30, stages: null };  // minutes before due the ring starts, as in pickups.py
 const TIMER_COLOR = "#e8eefc";  // the clock's Timer has no colour field; its firmware colour isn't confirmed yet
 const faceLeds = RINGS.map(() => []), faceKey = RINGS.map(() => Array(48).fill("")), hourDots = [];
 let faceMatrix;
@@ -612,9 +635,18 @@ function setLed(k, i, v) {  // v: null (off) or [color, opacity]
   faceLeds[k][i].style.fillOpacity = v ? v[1] : "";
 }
 
-function countdown(now) {  // the soonest countdown, which is the one on the clock's ring
+function countdown(now) {  // the countdown on the clock's ring (see refresh_ring in glanced.py)
   const t = now / 1000;
-  const it = S.unread.filter(i => (i.ring_due || 0) > t).sort((a, b) => a.ring_due - b.ring_due)[0];
+  // as on the clock: a running staged timer first, else the soonest
+  const it = S.unread.filter(i => (i.ring_due || 0) > t)
+    .sort((a, b) => (!a.stages - !b.stages) || a.ring_due - b.ring_due)[0];
+  if (it && it.stages) {  // the clock counts down the current stage
+    let end = it.start;
+    for (const [label, secs] of it.stages) {
+      end += secs;
+      if (end > t) return { item: it, left: end - t, frac: Math.min(1, (end - t) / secs), color: TIMER_COLOR, stage: label };
+    }
+  }
   if (!it) return null;
   const from = RING_FROM[it.kind];
   const start = it.ring_start || Math.max(it.time, from ? it.ring_due - from * 60 : it.time);
@@ -857,6 +889,35 @@ $("addPickup").onclick = async () => {
     const item = await api("/pickup", { name, when });
     toast(item.text.replace(/^PICKUP /, "Pickup: ")); $("pName").value = ""; $("pWhen").value = ""; markWhen(); loadUnread();
   } catch (e) { toast("Not added: " + e.message, true); }
+};
+
+// ---- staged timer ----
+const STAGE_PRESETS = {
+  focus25: ["FOCUS", 1, "WORK 25\nBREAK 5\nWORK 25\nBREAK 5\nWORK 25\nBREAK 5\nWORK 25"],
+  focus50: ["FOCUS", 1, "WORK 50\nBREAK 10\nWORK 50\nBREAK 10\nWORK 50"],
+  caps: ["CAPS", 1, "50V 15\n75V 15\n100V 15\n120V 15"],
+  glue: ["GLUE", 1, "CLAMP 45\nUNCLAMP 1"],
+  burnin: ["BURN-IN", 1, "WARM UP 30\nCHECK TEMPS 5\nCOLD START 30"],
+};
+document.querySelectorAll("[data-preset]").forEach(b => b.onclick = () => {
+  const [name, repeat, stages] = STAGE_PRESETS[b.dataset.preset];
+  $("sName").value = name; $("sRepeat").value = repeat; $("sStages").value = stages;
+  document.querySelectorAll("[data-preset]").forEach(c => c.classList.toggle("on", c === b));
+});
+function parseStages(text) {
+  // "50V 15" -> ["50V", 15]: the last number on the line is the minutes, the rest the label
+  return text.split("\n").map(l => l.trim()).filter(Boolean).map(l => {
+    const m = l.match(/^(.*?)[\s,:-]*(\d+(?:\.\d+)?)\s*(?:m|min|mins|minutes?)?$/i);
+    return m ? [m[1].trim() || "STEP", parseFloat(m[2])] : null;
+  });
+}
+$("startStages").onclick = async () => {
+  const stages = parseStages($("sStages").value);
+  if (!stages.length || stages.some(s => !s || !(s[1] > 0))) return toast("Each line needs a label and minutes, like 50V 15", true);
+  try {
+    const item = await api("/stages", { name: $("sName").value.trim(), stages, repeat: +$("sRepeat").value || 1 });
+    toast(item.text.replace(/^STAGES /, "Started: ")); loadUnread();
+  } catch (e) { toast("Not started: " + e.message, true); }
 };
 
 // ---- clock settings ----

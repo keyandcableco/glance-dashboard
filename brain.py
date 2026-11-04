@@ -52,6 +52,16 @@ def tools(clock_names):
         tool("set_hard_stop", "The speaker must stop working at a time (leave, close up, quit for the "
              "night). Nags at 30, 15 and 5 minutes before, then repeats for half an hour unless cleared.",
              {**WHEN, "label": {"type": "string", "description": "Why, or empty"}}),
+        tool("start_stages", "A run of labelled stages back to back on one timer, e.g. reforming capacitors "
+             "('50V 15 min, then 75V, 100V, 120V'), glue-ups ('clamp 45 then unclamp'), burn-in, lacquer coats, "
+             "or focus rhythms ('focus 25' = WORK 25 / BREAK 5, 4 rounds). Labels are what the clock "
+             "shows during each stage: short, capitals. Put ONE round in stages and the number of rounds in "
+             "repeat; never write the rounds out. Whole minutes; at most 24 stages and 24 hours in all.",
+             {"name": {"type": "string", "description": "What it's for, e.g. CAPS or FOCUS"},
+              "stages": {"type": "array", "minItems": 1, "description": "One round of stages, in order",
+                         "items": {"type": "object", "additionalProperties": False, "required": ["label", "minutes"],
+                                   "properties": {"label": {"type": "string"}, "minutes": {"type": "integer"}}}},
+              "repeat": {"type": "integer", "description": "How many times to run the list; 1 for once"}}),
         tool("change", "Change a timer, reminder, pickup or hard stop that's already set or going off: rename it, "
              "move it to a new time, give it more time ('five more minutes', 'snooze it 10'), or move it "
              "to another clock. Never use set_timer to change an existing one.",

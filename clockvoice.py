@@ -6,6 +6,7 @@
     clock, pickup Sam in 40 minutes              clock, show back in 5
     clock, clear                                 clockvoice.py --dry-run "clock, timer 30 minutes"
     clock, family, timer 10 minutes              (a clock's name first sends it to that clock)
+    clock, focus 50                              (staged: WORK 50 / BREAK 10, three rounds, ending on WORK)
 
 Stdlib only (runs under the system python). The bridge's /voice does the work: these
 patterns first (instant), Claude Haiku for looser phrasing. The reply is printed and spoken with $GLANCE_SAY (default ~/.local/bin/say-aloud) if it exists.
@@ -102,6 +103,15 @@ EDIT = re.compile(r"^(?:please\s+)?(?:cancel|stop the|kill|delete|remove|never ?
 def parse_command(t):
     if not re.match(r"(?:note|make a note|take a note|jot down|note to self)\b", t) and EDIT.match(t):
         return None
+    if m := re.fullmatch(r"(?:start (?:a )?)?focus(?: (?:for|session))?(?: (\d+)(?: minutes?)?)?"
+                         r"(?:,? (?:with|and) (\d+)(?: minutes?)? breaks?)?", t):
+        work = int(m[1] or 25)
+        if not 1 <= work <= 240:
+            return None  # leave odd lengths to the bridge, which says what's wrong
+        short = work <= 30  # like the panel presets: 25/5 four rounds, 50/10 three
+        rest, rounds = int(m[2] or (5 if short else 10)), 4 if short else 3
+        stages = [("WORK", work), ("BREAK", rest)] * rounds
+        return "/stages", {"name": "FOCUS", "stages": stages[:-1]}, None  # end on the last WORK, not a break
     if re.fullmatch(r"(?:clear|clear (?:it|all|everything)|all clear|dismiss(?: all)?)", t):
         return "/unread/clear", {}, "Cleared."
     if m := re.match(r"(?:note|make a note|take a note|jot down|note to self)\b[\s,:;-]*(?:that\s+|to\s+)?(.+)", t):
@@ -140,6 +150,11 @@ def post(path, body):
 
 
 def spoken_due(item):
+    if item["kind"] == "stages":
+        first = item["stages"][0][0]
+        count = len(item["stages"])
+        return (f"{count} stage{'s' if count != 1 else ''} for {item.get('name') or 'you'}, {first} first, "
+                f"done at {item['text'].rsplit(' ', 1)[-1]}.")
     label = {"pickup": "Pickup", "timer": "Timer", "stop": "Hard stop"}.get(item["kind"], "Set")
     name = f" for {item['name']}" if item.get("name") and item["kind"] == "timer" else (f", {item['name']}" if item.get("name") else "")
     hhmm = item["text"].rsplit(" ", 1)[-1]

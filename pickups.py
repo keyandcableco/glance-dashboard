@@ -1,22 +1,32 @@
-"""Pickups, timers and hard stops: "someone's coming in 40 minutes", "timer 30 minutes", "I need to stop
-at 6". Each is an unread item with a due time; clearing the item cancels it.
+"""Pickups, timers, hard stops and staged timers: "someone's coming in 40 minutes", "timer 30 minutes",
+"I need to stop at 6", "reform the caps: 50V 15, 75V 15...". Each is an unread item with a due time;
+clearing the item cancels it.
 
-Each kind alerts when added, at its warning stages (minutes before; a stage already passed is
-skipped), and when due. A hard stop keeps repeating after it's due until it's cleared. The ring
-counts down from ring_from minutes out (None: from the start).
+Each kind alerts when added, at its warnings (minutes before; one already passed is skipped), and
+when due. A hard stop repeats after it's due, for half an hour unless cleared. The ring counts down
+from ring_from minutes out (None: from the start). A staged timer runs its labelled stages back to
+back on the clock's own multi-interval timer, and only alerts at the end.
 """
 import asyncio
 import datetime
 import logging
+import math
 import re
 import time
+
+from glance import encode_text, pb
 
 KINDS = {
     "pickup": {"label": "PICKUP", "look": {"color": "DarkGoldenRod", "anim": "Wheel"}, "warn": (10,), "ring_from": 10},
     "timer": {"label": "TIMER", "look": {"color": "Turquoise", "anim": "Fan"}, "warn": (10,), "ring_from": None},
     "stop": {"label": "STOP", "look": {"color": "Red", "anim": "Pulse"}, "warn": (30, 15, 5), "ring_from": 30,
              "repeat_minutes": 5, "repeats": 6, "due_sound": "Waves"},
+    # a run of labelled stages on one native timer: cap reforming, glue-ups, burn-in, bench/admin rhythm
+    "stages": {"label": "STAGES", "look": {"color": "Turquoise", "anim": "Wheel"}, "warn": (), "ring_from": None},
 }
+MAX_STAGES = 24
+MAX_STAGE_S = MAX_RUN_S = 24 * 3600
+MAX_TIMER_BYTES = 500  # one Bluetooth write carries at most 512
 ALERT = {"sound": "Rise", "priority": "critical"}
 DAY_START, DAY_END = 7, 21  # a bare "2:30" means the next one in these hours (14:30), not 2:30 at night
 
@@ -87,10 +97,11 @@ STOPWORDS = ("the", "a", "an", "my", "that", "it", "one", "reminder", "hard")
 
 
 def matches(clock, what=""):
-    """(clock, item) for each timer, pickup or stop on this clock whose text has all the words."""
+    """(clock, item) for each timer, pickup, stop or staged timer on this clock whose text has all the
+    words ("timer" also matches a staged timer: "the caps timer")."""
     words = [w for w in re.findall(r"[a-z0-9]+", what.lower()) if w not in STOPWORDS]
     return [(clock, i) for i in clock.unread.items if i.get("due") and i.get("kind") in KINDS
-            and all(w in i["text"].lower() for w in words)]
+            and all(w in i["text"].lower() or (w == "timer" and i.get("stages")) for w in words)]
 
 
 def best(candidates):
@@ -100,6 +111,74 @@ def best(candidates):
     if going_off:
         return max(going_off, key=lambda c: c[1]["due"])
     return max(candidates, key=lambda c: c[1].get("time", 0), default=None)
+
+
+def stages_left(item, now):
+    """For a staged timer: [(label, seconds)] still ahead, the current one shortened; else []."""
+    if not item.get("stages"):
+        return []
+    out, t = [], item["start"]
+    for label, seconds in item["stages"]:
+        end = t + seconds
+        if end > now:
+            out.append((label, max(1, int(end - max(t, now)))))
+        t = end
+    return out
+
+
+def timer_payload(stages, final_text):
+    """The clock's Timer command for [(label, seconds)] stages, run back to back."""
+    timer = pb.Timer()
+    for label, seconds in stages:
+        interval = timer.intervals.add(duration=int(seconds))
+        if label:
+            interval.text.add(text=encode_text(label[:24]))
+    timer.finalText.add(text=encode_text(final_text[:24] or "TIME"))
+    return bytes([3, 0, 0, 0]) + timer.SerializeToString()
+
+
+def clean_stages(stages, name):
+    """[(label, minutes)] -> [(LABEL, seconds)], checked: ValueError says what's wrong."""
+    out = []
+    for n, (label, minutes) in enumerate(stages, 1):
+        minutes = float(minutes)
+        if not math.isfinite(minutes):
+            raise ValueError("a stage needs a length in minutes")
+        seconds = round(minutes * 60)
+        if seconds <= 0:
+            continue  # a zero-length stage is left out
+        if seconds > MAX_STAGE_S:
+            raise ValueError("a stage can be 24 hours at most")
+        out.append((str(label).upper()[:24] or f"STEP {n}", seconds))
+    if not out:
+        raise ValueError("no stages with a length")
+    if len(out) > MAX_STAGES:
+        raise ValueError(f"that's {len(out)} stages; {MAX_STAGES} at most")
+    if sum(s for _, s in out) > MAX_RUN_S:
+        raise ValueError("a staged timer can run 24 hours at most")
+    if len(timer_payload(out, name)) > MAX_TIMER_BYTES:
+        raise ValueError("too many stages with long labels for the clock; shorten the labels")
+    return out
+
+
+async def add_stages(clock, name, stages):
+    """A staged timer: stages = [(label, minutes)], run back to back on the clock's own timer.
+    Everything is checked before anything is saved."""
+    name = str(name).upper()[:40]
+    stages = clean_stages(stages, name)
+    spec = KINDS["stages"]
+    now = time.time()
+    item = clock.unread.add({"text": "", **spec["look"]}, "stages")
+    item.update(kind="stages", name=name, stages=stages, start=now)
+    schedule(item, now + sum(s for _, s in stages))
+    clock.unread._save()
+    log.info("stages added: %s (%s)", item["text"], ", ".join(f"{l} {s // 60}m" for l, s in stages))
+    await start_ring(clock, item)
+    try:
+        await clock.notify(text=f"{item['text']}: {stages[0][0]} FIRST", **spec["look"], **ALERT)
+    except Exception as e:
+        log.warning("stages alert failed: %s", e)
+    return item
 
 
 def find(clock, what=""):

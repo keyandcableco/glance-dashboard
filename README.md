@@ -22,6 +22,15 @@ of his `Glance.proto`, fixed so `protoc` accepts it. Everything here builds on t
   anything that can `curl` (a Claude Code hook is in `contrib/`).
 - **Timers, pickups and hard stops**, with the clock's own **ring countdown**. A hard stop nags at 30, 15
   and 5 minutes, then repeats "STOP NOW" every 5 minutes for half an hour unless cleared.
+- **Staged timers** on the clock's own multi-interval timer: each stage counts down on the ring with its
+  label on the text line. Cap reforming ("50V 15 → 75V 15 → 100V 15 → 120V 15"), glue-ups, burn-in,
+  lacquer coats, or focus rhythms ("hey glance, focus" = WORK 25 / BREAK 5, four rounds ending on WORK).
+  Presets on the panel. Up to 24 stages and 24 hours; labels up to 24 characters. A running staged timer
+  takes the ring ahead of other countdowns (their alerts still fire), alerts once at the end, and can be
+  renamed or cancelled but not moved.
+- **Forecast graph**: the next 24 hours of humidity, temperature or chance of rain drawn around the ring
+  by the clock's own forecast display, with the current value on the text line (US National Weather
+  Service, or Open-Meteo for non-commercial use elsewhere).
 - **Unread list** that replays silently every 5 minutes until cleared.
 - **Status ring**, always on under the clock's time and date: one colored segment per unread item on the
   outer ring (the oldest 12), and, while break reminders are on, your current active stretch growing
@@ -31,7 +40,7 @@ of his `Glance.proto`, fixed so `protoc` accepts it. Everything here builds on t
   closing-time nudges. Snooze from the panel.
 - **Voice**: `clockvoice.py` takes a transcribed sentence ("Sam's swinging by for the Juno after lunch").
   Common phrasings are matched instantly; anything looser goes to Claude Haiku with a small set of tools:
-  timers, pickups, hard stops, messages, notes, changing what's set ("rename the 8:53 timer to bake",
+  timers, pickups, hard stops, staged timers, messages, notes, changing what's set ("rename the 8:53 timer to bake",
   "push Sam back to 3", "five more minutes", "move that to the kitchen clock"), cancelling, clearing,
   and, with an optional shop app,
   clocking in and out, the job you're on now, and waiting-on-customer follow-ups. Hook it to whatever dictation you use; it prints the reply and speaks it with
@@ -118,7 +127,8 @@ All on `http://127.0.0.1:8740`; every call takes an optional `clock` (name), def
 | Call | Body / query | |
 |---|---|---|
 | `POST /notify` | `text, color, anim, sound, mode, priority, keep` | Show an alert; `keep` adds it to unread |
-| `POST /pickup` | `kind` (`pickup`, `timer`, `stop`), `name`, `when` (`40m`, `1h30`, `2:30pm`, `14:30`) | |
+| `POST /pickup` | `kind` (`pickup`, `timer` or `stop`), `name`, `when` (`40m`, `1h30`, `2:30pm`, `14:30`) | |
+| `POST /stages` | `name`, `stages` (`[["50V", 15], …]` or `[{"label", "minutes"}]`), `repeat` | Up to 24 stages |
 | `POST /voice` | `text` | A spoken sentence; returns `reply` to say back |
 | `GET /unread`, `POST /unread/clear` | `id` (none: all) | |
 | `GET/POST /notes` | `text` to add; `id` with `done` or `delete` | |
@@ -141,7 +151,8 @@ an unknown `{name}`; everywhere else (email subjects, calendar titles, names) it
 - **One display at a time**: a Notify replaces a ring scene and vice versa.
 - **Text**: about 32 bytes of one text piece fit; a Notice can carry several pieces, shown in turn.
   The default `Repeat` modifier shows each piece twice.
-- **Timer** (`3,0,0,0` + `Timer`) counts down on the ring; **TimerStop must be 4 bytes** (`10,0,0,0`).
+- **Timer** (`3,0,0,0` + `Timer`) counts down on the ring; with several `intervals`, each with a TextData
+  label, it runs them back to back, showing each label. **TimerStop must be 4 bytes** (`10,0,0,0`).
 - The clock reads the Current Time Service from the central when it connects.
 - A short-lived second BLE client to the same clock (a one-off script like `set_setting.py`) drops the
   bridge's link when it disconnects; the bridge reconnects within seconds.
@@ -150,7 +161,7 @@ an unknown `{name}`; everywhere else (email subjects, calendar titles, names) it
 
 `glanced.py` the bridge · `glance.py` protocol helpers + one-shot CLI · `config.py` · `mailwatch.py`,
 `textwatch.py`, `calwatch.py` sources · `pickups.py` timers/pickups/stops · `unread.py` · `nudges.py` ·
-`notes.py` · `statusring.py` · `shopapp.py` optional shop app · `brain.py` Haiku · `clockvoice.py` voice front end · `panel.html` · `pickup` CLI ·
+`notes.py` · `statusring.py` · `forecast.py` · `shopapp.py` optional shop app · `brain.py` Haiku · `clockvoice.py` voice front end · `panel.html` · `pickup` CLI ·
 `set_setting.py` · `contrib/`
 
 ## License

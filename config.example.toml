@@ -32,6 +32,13 @@ names = ["Alex"]
 [clocks.office.calendar]
 url_file = "calendar_url"
 
+# Optional: a 24-hour forecast drawn around the ring.
+[clocks.office.forecast]
+latitude = 40.0
+longitude = -75.0
+show = "humidity"   # humidity | temperature | rain
+source = "nws"      # nws (US, any use) | open-meteo (worldwide, non-commercial use only)
+
 # Optional: hyperfocus nudges (the panel can change these later).
 [clocks.office.nudges]
 break_minutes = 75

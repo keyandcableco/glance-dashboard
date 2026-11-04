@@ -16,13 +16,13 @@ import os
 import re
 import time
 
-import aiohttp
 from aiohttp import web
 from bleak import BleakClient
 from bless import BlessServer, GATTAttributePermissions, GATTCharacteristicProperties
 
 import brain
 import calwatch
+import forecast
 import shopapp
 import statusring
 import clockvoice
@@ -33,7 +33,7 @@ import nudges
 import pickups
 import textwatch
 import unread
-from glance import CHAR, NOTIFY, PRIORITIES, build_notice, encode_text
+from glance import CHAR, NOTIFY, PRIORITIES, build_notice
 import glance_pb2 as pb  # on sys.path via glance
 
 PANEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "panel.html")
@@ -110,7 +110,7 @@ class Clock:
 
     async def countdown(self, due, owner, text):
         """Ask for a ring countdown to `due` for unread item `owner`. The clock has one ring
-        timer, so it goes to the soonest wanted countdown; refresh_ring hands it on."""
+        timer, so refresh_ring decides who has it (a running staged timer, else the soonest)."""
         for item in self.unread.items:
             if item["id"] == owner:
                 item.update(ring_due=due, ring_text=text[:24] or "TIME")
@@ -118,11 +118,13 @@ class Clock:
         await self.refresh_ring()
 
     async def refresh_ring(self):
-        """Put the soonest wanted countdown on the ring; stop it if none is left. Called on
-        every change and every 20 s, so a later countdown takes over when one ends or is cleared."""
+        """Put the wanted countdown on the ring (a running staged timer first, else the soonest);
+        stop it if none is left. Called on every change and every 20 s, so the next one takes over
+        when one ends or is cleared."""
         now = time.time()
         wanted = [i for i in self.unread.items if i.get("ring_due", 0) > now]
-        best = min(wanted, key=lambda i: i["ring_due"], default=None)
+        # a running staged timer first (its stage labels are the point), then the soonest due
+        best = min(wanted, key=lambda i: (not i.get("stages"), i["ring_due"]), default=None)
         if best is None:
             if self.ring_unknown or (self.ring and self.ring[0] > now):  # cleared before it finished, or left from before a restart
                 with contextlib.suppress(Exception):  # not connected yet: try again on the next check
@@ -131,11 +133,10 @@ class Clock:
             return
         if self.ring == (best["ring_due"], best["id"]) and self.ring[0] > now:
             return
-        timer = pb.Timer()
-        timer.intervals.add(duration=max(1, int(best["ring_due"] - now)))
-        timer.finalText.add(text=encode_text(best["ring_text"]))
         try:
-            await self.write(bytes([TIMER, 0, 0, 0]) + timer.SerializeToString())
+            # a staged timer sends the stages still ahead, each with its label; others one interval
+            stages = pickups.stages_left(best, now) or [("", max(1, int(best["ring_due"] - now)))]
+            await self.write(pickups.timer_payload(stages, best["ring_text"]))
             self.ring, self.ring_unknown = (best["ring_due"], best["id"]), False
         except Exception as e:
             log.warning("countdown failed: %s", e)
@@ -343,10 +344,21 @@ def make_app(clocks, shop_url=None):
         log.info("%s: settings: %s", clock.name, body)
         return web.json_response(settings_json(s))
 
+    async def add_stages(request):
+        """{"name", "stages": [[label, minutes], ...] or [{"label", "minutes"}], "repeat"}"""
+        body = await read_body(request)
+        try:
+            stages = [(s["label"], s["minutes"]) if isinstance(s, dict) else (s[0], s[1]) for s in body.get("stages", [])]
+            stages = [(str(l), float(m)) for l, m in stages] * max(1, min(int(body.get("repeat") or 1), 12))
+            item = await pickups.add_stages(pick(request, body), str(body.get("name", "")), stages)
+        except (KeyError, IndexError, TypeError, ValueError, OverflowError) as e:
+            return web.json_response({"error": f"bad stages: {e}"}, status=400)
+        return web.json_response(item)
+
     async def add_pickup(request):
         body = await read_body(request)
         kind = body.get("kind", "pickup")
-        if not body.get("when") or kind not in pickups.KINDS or (kind == "pickup" and not body.get("name")):
+        if not body.get("when") or kind not in ("pickup", "timer", "stop") or (kind == "pickup" and not body.get("name")):
             return web.json_response({"error": "when (and a name for pickups) required"}, status=400)
         try:
             item = await pickups.add(pick(request, body), str(body.get("name", "")).strip(), body["when"], kind)
@@ -373,6 +385,13 @@ def make_app(clocks, shop_url=None):
             return "/note", {"text": args["text"], **target}
         if name == "cancel":
             return "/cancel", {"what": args.get("what", ""), **target}
+        if name == "start_stages":
+            stages = [(s.get("label", ""), s.get("minutes", 0)) for s in args.get("stages", [])]
+            rounds = max(1, min(int(args.get("repeat") or 1), 12))
+            stages = stages * rounds
+            if rounds > 1 and stages and re.search(r"BREAK|REST|PAUSE", str(stages[-1][0]).upper()):
+                stages = stages[:-1]  # repeated rounds end on the last work stage, not a break
+            return "/stages", {"name": args.get("name", ""), "stages": stages, **target}
         if name == "change":
             return "/change", {k: args.get(k) for k in ("what", "new_label", "minutes", "at", "add_minutes", "move_to")} | target
         if name in ("clock_in", "clock_out"):
@@ -441,6 +460,8 @@ def make_app(clocks, shop_url=None):
         name = args["new_label"].upper()[:60] if args.get("new_label") else None
         target = clocks.get(args.get("move_to") or "")
         moving = target is not None and target is not clock
+        if item["kind"] == "stages" and (due is not None or moving):
+            return "A staged timer can only be renamed or cancelled. Cancel it and start it again."
         if due is None and name is None and not moving:
             return "What should I change about it?"
         if moving:
@@ -518,6 +539,9 @@ def make_app(clocks, shop_url=None):
                 await clock.alert("voice", text="{sun} NOTED", color="Aqua", anim="Pulse", sound="NoneSound",
                                   priority="critical")
                 reply = "Noted."
+            elif path == "/stages":
+                item = await pickups.add_stages(clock, args.get("name", ""), args["stages"])
+                reply = clockvoice.spoken_due(item)
             elif path == "/change":
                 reply = await change({**args, "clock": request_clock})
             elif path == "/cancel":
@@ -585,7 +609,7 @@ def make_app(clocks, shop_url=None):
     app.add_routes([web.post("/notify", notify), web.get("/status", status),
                     web.get("/unread", list_unread), web.post("/unread/clear", clear_unread),
                     web.get("/settings", get_settings), web.post("/settings", set_settings),
-                    web.get("/options", options), web.post("/pickup", add_pickup), web.post("/voice", voice), web.get("/nudges", get_nudges), web.get("/notes", list_notes), web.post("/notes", change_note), web.post("/nudges", set_nudges), web.get("/", panel)])
+                    web.get("/options", options), web.post("/pickup", add_pickup), web.post("/stages", add_stages), web.post("/voice", voice), web.get("/nudges", get_nudges), web.get("/notes", list_notes), web.post("/notes", change_note), web.post("/nudges", set_nudges), web.get("/", panel)])
     return app
 
 
@@ -618,6 +642,8 @@ async def main():
             watchers["texts"] = lambda clock=clock, c=c: textwatch.watch(clock, c["texts"])
         if "calendar" in c:
             watchers["calendar"] = lambda clock=clock, c=c: calwatch.watch(clock, c["calendar"])
+        if "forecast" in c:
+            watchers["forecast"] = lambda clock=clock, c=c: forecast.watch(clock, c["forecast"])
         if not tasks and cfg.get("shop_app", {}).get("url"):  # follow-up nags go to the first clock
             watchers["followups"] = lambda clock=clock: shopapp.watch_followups(clock, cfg["shop_app"])
         tasks += [asyncio.create_task(supervised(f"{name} {label}", start)) for label, start in watchers.items()]
