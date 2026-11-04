@@ -216,10 +216,13 @@ class Clock:
 
     async def alert(self, source, keep=False, **fields):
         """Show an alert; with keep, also add it to the unread list (even if the clock is offline).
+        The same text again from the same source counts up the item already there, and shows the count.
         Bad names fail before anything is stored."""
         data = self.notice(**fields)
         if keep:
-            self.unread.add({k: v for k, v in fields.items() if k != "strict"}, source)
+            item = self.unread.add({k: v for k, v in fields.items() if k != "strict"}, source, merge=True)
+            if item.get("count", 1) > 1:
+                data = self.notice(**{**fields, "text": unread.shown(item)})
         await self.write(data)
 
 

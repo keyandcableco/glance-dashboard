@@ -789,7 +789,7 @@ async function loadUnread() {
   $("unread").innerHTML = items.length ? items.slice().reverse().map(i => `
     <li class="item">
       <span class="chipled">${ledChip(i.color)}</span>
-      <div class="itext"><div class="t">${richText(i.text)}</div>
+      <div class="itext"><div class="t">${richText(i.text)}${i.count > 1 ? " ×" + (+i.count) : ""}</div>
         <div class="meta"><span class="src">${esc(i.source)}</span> · ${ago(i.time)}${i.due ? ` · <span data-due="${+i.due}"></span>` : ""}</div></div>
       <button class="btn sm" data-id="${esc(i.id)}" aria-label="Clear: ${esc(i.text)}">Clear</button>
     </li>`).join("") : `<li class="empty">Nothing unread.</li>`;

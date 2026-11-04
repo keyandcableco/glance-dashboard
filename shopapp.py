@@ -64,7 +64,7 @@ def prune(clock, due_now):
 
 async def watch_followups(clock, cfg):
     hours = cfg.get("followup_hours", NAG_HOURS)
-    if not isinstance(hours, list) or not all(isinstance(h, int) and 0 <= h <= 23 for h in hours):
+    if not isinstance(hours, (list, tuple)) or not all(isinstance(h, int) and 0 <= h <= 23 for h in hours):
         log.warning("followup_hours should be a list of hours like [10, 15]; using %s", list(NAG_HOURS))
         hours = NAG_HOURS
     while True:

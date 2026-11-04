@@ -31,9 +31,17 @@ class Unread:
         tmp.write_text(json.dumps(self.items, indent=1))
         tmp.replace(self.path)
 
-    def add(self, fields, source):
-        item = {"id": uuid.uuid4().hex[:8], "time": time.time(), "source": source,
-                **{k: fields[k] for k in ("text", "color", "anim") if k in fields}}
+    def add(self, fields, source, merge=False):
+        """A new item; with merge, the same text from the same source again counts up the one already
+        there and moves it to the end, so twenty texts from one person are one item, not twenty."""
+        kept = {k: fields[k] for k in ("text", "color", "anim") if k in fields}
+        item = next((i for i in self.items if i.get("source") == source and i.get("text") == kept.get("text")), None) \
+            if merge else None
+        if item:
+            self.items.remove(item)
+            item.update(kept, time=time.time(), count=item.get("count", 1) + 1)
+        else:
+            item = {"id": uuid.uuid4().hex[:8], "time": time.time(), "source": source, **kept}
         self.items.append(item)
         self._save()
         return item
@@ -45,6 +53,12 @@ class Unread:
         return before - len(self.items)
 
 
+def shown(item):
+    """The item's text, with how many times it came when that's more than once: "{heart} SAM (3)"."""
+    count = item.get("count", 1)
+    return f"{item['text']} ({count})" if count > 1 else item["text"]
+
+
 async def replay(clock):
     while True:
         await asyncio.sleep(REPLAY_MINUTES * 60)
@@ -52,7 +66,7 @@ async def replay(clock):
             if item not in clock.unread.items:  # cleared mid-pass
                 continue
             try:
-                await clock.notify(text=item["text"], color=item.get("color", "Lime"),
+                await clock.notify(text=shown(item), color=item.get("color", "Lime"),
                                    anim=item.get("anim", "Pulse"), sound="NoneSound", priority="critical")
             except ConnectionError:
                 break  # clock gone: try the whole list next time
