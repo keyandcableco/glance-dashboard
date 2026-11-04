@@ -22,6 +22,11 @@ of his `Glance.proto`, fixed so `protoc` accepts it. Everything here builds on t
   anything that can `curl` (a Claude Code hook is in `contrib/`).
 - **Timers, pickups and hard stops**, with the clock's own **ring countdown**. A hard stop nags at 30, 15
   and 5 minutes, then repeats "STOP NOW" every 5 minutes for half an hour unless cleared.
+- **Light flash** for anything due now (a timer, pickup or stop going off, a calendar event starting): all
+  four rings flash red and white for 3 seconds before the text. `/notify` takes `"flash": true` too.
+- **Schedule ring**: the next 11 hours of calendar events (aqua), pickups (gold) and hard stops (red) as
+  blocks around the dial at their times, drawn by the clock's own appointments display. It stops at
+  midnight. Set `schedule_ring = false` in a clock's section to turn it off.
 - **Staged timers** on the clock's own multi-interval timer: each stage counts down on the ring with its
   label on the text line. Cap reforming ("50V 15 → 75V 15 → 100V 15 → 120V 15"), glue-ups, burn-in,
   lacquer coats, or focus rhythms ("hey glance, focus" = WORK 25 / BREAK 5, four rounds ending on WORK).
@@ -126,7 +131,7 @@ All on `http://127.0.0.1:8740`; every call takes an optional `clock` (name), def
 
 | Call | Body / query | |
 |---|---|---|
-| `POST /notify` | `text, color, anim, sound, mode, priority, keep` | Show an alert; `keep` adds it to unread |
+| `POST /notify` | `text, color, anim, sound, mode, priority, keep, flash` | Show an alert; `keep` adds it to unread, `flash` opens with the light flash |
 | `POST /pickup` | `kind` (`pickup`, `timer` or `stop`), `name`, `when` (`40m`, `1h30`, `2:30pm`, `14:30`) | |
 | `POST /stages` | `name`, `stages` (`[["50V", 15], …]` or `[{"label", "minutes"}]`), `repeat` | Up to 24 stages |
 | `POST /voice` | `text` | A spoken sentence; returns `reply` to say back |
@@ -153,6 +158,17 @@ an unknown `{name}`; everywhere else (email subjects, calendar titles, names) it
   The default `Repeat` modifier shows each piece twice.
 - **Timer** (`3,0,0,0` + `Timer`) counts down on the ring; with several `intervals`, each with a TextData
   label, it runs them back to back, showing each label. **TimerStop must be 4 bytes** (`10,0,0,0`).
+- **Appointments** (`8,0,8,7` + `AppointmentsScene`; Hypfer's notes leave the data format open).
+  `appointmentData` is 8 bytes per appointment: a little-endian uint32 `start | length<<11 | reminder<<22`
+  (11, 11 and 10 bits: start in minutes after the scene's `timestamp`, length in minutes, reminder in
+  minutes before, 1023 = none), then blue, green, red, and the height (3, 6, 9 or 12 = one to four rings,
+  from the outside in), with one `appointmentNames` entry each. All 144 appointments in his
+  `sample_appointments.js` captures re-encode exactly. The bridge writes local midnight (as if UTC) as the
+  timestamp, which draws correctly on a real clock; the app also used noon, with starts past 24 hours.
+  Overlapping appointments get stepped heights (12, 9, 6, 3), taller ones first, so all stay visible.
+- **Light flash**: a CustomScene with a Fill and an `AreaAnimation` of type `LightFlash` over the same
+  area (`flashLight.color`, `speed`). Like any scene it's saved and keeps cycling, so delete its slot
+  after it has played.
 - The clock reads the Current Time Service from the central when it connects.
 - A short-lived second BLE client to the same clock (a one-off script like `set_setting.py`) drops the
   bridge's link when it disconnects; the bridge reconnects within seconds.
@@ -161,7 +177,7 @@ an unknown `{name}`; everywhere else (email subjects, calendar titles, names) it
 
 `glanced.py` the bridge · `glance.py` protocol helpers + one-shot CLI · `config.py` · `mailwatch.py`,
 `textwatch.py`, `calwatch.py` sources · `pickups.py` timers/pickups/stops · `unread.py` · `nudges.py` ·
-`notes.py` · `statusring.py` · `forecast.py` · `shopapp.py` optional shop app · `brain.py` Haiku · `clockvoice.py` voice front end · `panel.html` · `pickup` CLI ·
+`notes.py` · `statusring.py` (and the light flash) · `schedulering.py` · `forecast.py` · `shopapp.py` optional shop app · `brain.py` Haiku · `clockvoice.py` voice front end · `panel.html` · `pickup` CLI ·
 `set_setting.py` · `contrib/`
 
 ## License

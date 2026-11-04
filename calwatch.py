@@ -3,8 +3,9 @@
 Reads the calendar's secret iCal address (Google Calendar > Settings > the calendar >
 "Secret address in iCal format") from the file named in config.toml [clocks.<name>.calendar]
 url_file. Read-only; no Google login here.
-Each event alerts STAGES minutes before (and at the start) and sits in the unread cycle from the first
-warning until EXPIRE_MINUTES after it starts.
+Each event alerts STAGES minutes before (and at the start, with the light flash) and sits in the unread
+cycle from the first warning until EXPIRE_MINUTES after it starts. The events also go on clock.events
+for the schedule ring.
 """
 import asyncio
 import datetime
@@ -28,7 +29,7 @@ log = logging.getLogger("glanced.calendar")
 
 
 def upcoming(ics_bytes, hours=24):
-    """Timed events starting within the next `hours`: [(uid, start_epoch, title)]."""
+    """Timed events starting within the next `hours`: [(uid, start_epoch, title, end_epoch)]."""
     cal = icalendar.Calendar.from_ical(ics_bytes)
     now = datetime.datetime.now().astimezone()
     events = []
@@ -39,8 +40,13 @@ def upcoming(ics_bytes, hours=24):
             continue
         if start.tzinfo is None:
             start = start.astimezone()
+        end = ev.get("DTEND").dt if ev.get("DTEND") else start
+        if not isinstance(end, datetime.datetime):
+            end = start
+        elif end.tzinfo is None:
+            end = end.astimezone()
         title = " ".join(str(ev.get("SUMMARY", "Event")).split())
-        events.append((str(ev.get("UID", title)), start.timestamp(), title))
+        events.append((str(ev.get("UID", title)), start.timestamp(), title, max(start, end).timestamp()))
     return events
 
 
@@ -74,8 +80,9 @@ async def watch(clock, cfg):
                     log.warning("calendar fetch failed: HTTP %s (check calendar_url)", e.status)
                 except Exception as e:
                     log.warning("calendar fetch failed: %s", type(e).__name__)
+                clock.events = events
 
-            for uid, start, title in events:
+            for uid, start, title, _end in events:
                 if now > start + EXPIRE_MINUTES * 60:
                     continue
                 due = [s for s in STAGES if now >= start - s * 60]  # stages already reached
@@ -96,7 +103,7 @@ async def watch(clock, cfg):
                     await clock.countdown(start, owner, title)
                 text = stage_text(stage, start, title)
                 try:
-                    await clock.notify(text=text, **LOOK, **ALERT)
+                    await clock.notify(text=text, **LOOK, **ALERT, flash=stage == 0)
                     log.info("calendar alert: %s", text)
                 except Exception as e:
                     log.warning("calendar alert failed: %s", e)

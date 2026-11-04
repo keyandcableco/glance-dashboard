@@ -3,7 +3,7 @@
 clearing the item cancels it.
 
 Each kind alerts when added, at its warnings (minutes before; one already passed is skipped), and
-when due. A hard stop repeats after it's due, for half an hour unless cleared. The ring counts down
+when due, with the light flash. A hard stop repeats after it's due, for half an hour unless cleared. The ring counts down
 from ring_from minutes out (None: from the start). A staged timer runs its labelled stages back to
 back on the clock's own multi-interval timer, and only alerts at the end.
 """
@@ -264,7 +264,7 @@ async def watch(clock):
             name = item.get("name", "")
             try:
                 await clock.notify(text=" ".join(filter(None, (spec["label"], stage, name)))[:120],
-                                   **spec["look"], sound=sound, priority=ALERT["priority"])
+                                   **spec["look"], sound=sound, priority=ALERT["priority"], flash=stage == "NOW")
                 log.info("%s %s: %s", spec["label"], stage, name)
             except Exception as e:
                 log.warning("%s alert failed: %s", spec["label"], e)

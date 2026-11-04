@@ -12,6 +12,7 @@ port = 8740
 [clocks.office]
 address = "AA:BB:CC:DD:EE:FF"   # bluetoothctl devices, after pairing (see README)
 # status_ring = false           # turn off the always-on ring (unread segments, focus arc)
+# schedule_ring = false         # turn off calendar events, pickups and stops drawn around the dial
 
 # Optional: alert on emails in a Thunderbird inbox (its local mbox file).
 [clocks.office.mail]

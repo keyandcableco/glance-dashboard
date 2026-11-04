@@ -31,6 +31,7 @@ import mailwatch
 import notes
 import nudges
 import pickups
+import schedulering
 import textwatch
 import unread
 from glance import CHAR, NOTIFY, PRIORITIES, build_notice
@@ -39,6 +40,7 @@ import glance_pb2 as pb  # on sys.path via glance
 PANEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "panel.html")
 SETTINGS_CMD = bytes([5, 0, 0, 0])
 TIMER, TIMER_STOP = 3, 10
+FLASH_S = 3.5  # the light flash runs 3 s; its scene is deleted after
 PASSWORD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "panel_password")
 LOCAL = ("127.0.0.1", "::1")
 CTS_SERVICE = "00001805-0000-1000-8000-00805f9b34fb"
@@ -107,6 +109,8 @@ class Clock:
         self.ring = None  # (due epoch, unread item id) of the countdown on the ring
         self.ring_unknown = True  # after a start the clock may still run a countdown we no longer know about
         self.last_alert = 0.0  # when an alert or countdown was last sent (the status ring waits after it)
+        self.events = []  # calendar events (uid, start, title, end) in the next 24 h, from calwatch
+        self.flashing = asyncio.Lock()  # one flash and its notice at a time: flashes share one slot
 
     async def countdown(self, due, owner, text):
         """Ask for a ring countdown to `due` for unread item `owner`. The clock has one ring
@@ -175,6 +179,8 @@ class Clock:
                 self.client = BleakClient(self.addr, disconnected_callback=lambda _: self.lost.set())
                 await self.client.connect()
                 log.info("%s: connected to %s", self.name, self.addr)
+                with contextlib.suppress(Exception):  # a flash cut off by a lost link would keep strobing
+                    await self.write(bytes([statusring.SCENES_DELETE, 0, 0, statusring.FLASH_SLOT]))
                 await self.lost.wait()
                 log.warning("%s: disconnected", self.name)
             except Exception as e:  # BLE errors come in many types; just retry
@@ -186,8 +192,35 @@ class Clock:
         """The bytes of a Notify command; raises ValueError (or KeyError for priority) on bad names."""
         return bytes([NOTIFY, PRIORITIES[priority], 0, 0]) + build_notice(text, anim, sound, color, mode, strict)
 
-    async def notify(self, **fields):
-        await self.write(self.notice(**fields))
+    async def flash(self):
+        """The red light flash on all four rings, then its scene deleted, which is tried twice since a
+        leftover keeps strobing (a reconnect deletes it too). Best effort: failures are only logged."""
+        if not self.connected:
+            return
+        try:
+            await self.write(statusring.flash_bytes())
+            self.last_alert = time.time()  # the status ring waits, as after an alert
+            await asyncio.sleep(FLASH_S)
+        except Exception as e:
+            log.warning("%s: flash failed: %s", self.name, e)
+        finally:
+            for attempt in (1, 2):
+                try:
+                    await self.write(bytes([statusring.SCENES_DELETE, 0, 0, statusring.FLASH_SLOT]))
+                    break
+                except Exception as e:
+                    log.warning("%s: removing the flash failed (try %d): %s", self.name, attempt, e)
+
+    async def show(self, data, flash=False):
+        """Send a notice; with flash, the light flash first (for something due now)."""
+        if not flash:
+            return await self.write(data)
+        async with self.flashing:
+            await self.flash()
+            await self.write(data)
+
+    async def notify(self, flash=False, **fields):
+        await self.show(self.notice(**fields), flash)  # bad names fail before anything is sent
 
     async def read_settings(self):
         if not self.connected:
@@ -214,16 +247,16 @@ class Clock:
             await self.client.write_gatt_char(CHAR, SETTINGS_CMD + s.SerializeToString(), response=True)
         return await self.read_settings()
 
-    async def alert(self, source, keep=False, **fields):
-        """Show an alert; with keep, also add it to the unread list (even if the clock is offline).
-        The same text again from the same source counts up the item already there, and shows the count.
-        Bad names fail before anything is stored."""
+    async def alert(self, source, keep=False, flash=False, **fields):
+        """Show an alert (with flash, the light flash first); with keep, also add it to the unread list
+        (even if the clock is offline). The same text again from the same source counts up the item
+        already there, and shows the count. Bad names fail before anything is stored."""
         data = self.notice(**fields)
         if keep:
             item = self.unread.add({k: v for k, v in fields.items() if k != "strict"}, source, merge=True)
             if item.get("count", 1) > 1:
                 data = self.notice(**{**fields, "text": unread.shown(item)})
-        await self.write(data)
+        await self.show(data, flash)
 
 
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "[::1]")
@@ -296,7 +329,8 @@ def make_app(clocks, shop_url=None):
             return web.json_response({"error": "text required"}, status=400)
         fields = {k: body[k] for k in ("text", "color", "anim", "sound", "mode", "priority") if k in body}
         try:
-            await clock.alert(str(body.get("source", "api")), keep=bool(body.get("keep")), strict=True, **fields)
+            await clock.alert(str(body.get("source", "api")), keep=bool(body.get("keep")), flash=bool(body.get("flash")),
+                              strict=True, **fields)
         except ValueError as e:  # unknown icon, color, animation or sound name
             return web.json_response({"error": str(e)}, status=400)
         except (KeyError, TypeError) as e:
@@ -639,6 +673,8 @@ async def main():
                     "pickups": lambda clock=clock: pickups.watch(clock), "nudges": lambda clock=clock: nudges.watch(clock)}
         ring = statusring.watch if c.get("status_ring", True) else statusring.clear
         watchers["ring"] = lambda clock=clock, ring=ring: ring(clock)
+        schedule = schedulering.watch if c.get("schedule_ring", True) else schedulering.clear
+        watchers["schedule"] = lambda clock=clock, schedule=schedule: schedule(clock)
         if "mail" in c:
             watchers["mail"] = lambda clock=clock, c=c: mailwatch.watch(clock, c["mail"])
         if "texts" in c:

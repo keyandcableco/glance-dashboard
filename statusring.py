@@ -9,12 +9,15 @@ changes. The clock shows one thing at a time, so the ring never redraws while a 
 the ring or within QUIET_AFTER_S of an alert, which would cut either off. Saved scenes keep cycling
 until deleted, so it only ever uses SLOT, deletes it when there's nothing to show, and clears a
 leftover one after every (re)connect; with status_ring = false, clear() just removes it once.
+The schedule ring (schedulering.py) is kept drawn the same way, in its own slot.
+
+Also here: the red light flash that alerts about something due now open with.
 """
 import asyncio
 import logging
 import time
 
-from glance import pb  # glance puts the generated protocol module on the path
+from glance import PRIORITIES, pb  # glance puts the generated protocol module on the path
 
 SLOT = 4
 MODE_WATCHFACE = 8
@@ -26,6 +29,9 @@ ITEM_PX, ITEM_GAP, MAX_ITEMS = 3, 1, 12  # 12 × 4 = 48 pixels
 ARC_STEPS = 12
 FOCUS_WARN = 0.8
 SCENE, SCENES_DELETE = 0, 33
+MODE_WHOLE = 0
+FLASH_SLOT = 3
+FLASH_FRAMES = 150  # 3 s
 COLORS = {name.lower(): name for name in pb.Color.keys()}
 
 log = logging.getLogger("glanced.ring")
@@ -62,12 +68,27 @@ def scene_bytes(segs):
     return bytes([SCENE, PRIORITY, MODE_WATCHFACE, SLOT]) + scene.SerializeToString()
 
 
+def flash_bytes():
+    """The light flash: all four rings red with a white strobe over them, FLASH_FRAMES long. It's a
+    saved scene like any other, so whoever sends it deletes FLASH_SLOT once it has played."""
+    scene, obj = pb.CustomScene(), pb.CustomScene.Object
+    everything = segment(0, 48, "Red", 0, 3)
+    scene.object.add(method=obj.Fill, lifeTime=FLASH_FRAMES, result=obj.Expired).fill.segment.append(everything)
+    flash = scene.object.add(method=obj.AreaAnimation, lifeTime=FLASH_FRAMES, result=obj.Expired).areaAnimation
+    flash.type = obj.AreaAnimationData.LightFlash
+    flash.area.append(everything)
+    flash.flashLight.color = pb.Color.Value("White")
+    flash.flashLight.speed = 3
+    return bytes([SCENE, PRIORITIES["critical"], MODE_WHOLE, FLASH_SLOT]) + scene.SerializeToString()
+
+
 def busy(clock, now):
     """A countdown on the ring, or an alert that may still be showing."""
     return bool(clock.ring and clock.ring[0] > now) or now - clock.last_alert < QUIET_AFTER_S
 
 
-async def watch(clock):
+async def watch(clock, picture=picture, scene_bytes=scene_bytes, slot=SLOT, what="status ring"):
+    """Keep picture(clock, now) drawn in slot (empty: the slot deleted)."""
     shown, shown_at, client, counting = None, 0.0, None, False
     while True:
         await asyncio.sleep(20)
@@ -88,14 +109,14 @@ async def watch(clock):
             if want:
                 await clock.write(scene_bytes(want))
             else:
-                await clock.write(bytes([SCENES_DELETE, 0, 0, SLOT]))
+                await clock.write(bytes([SCENES_DELETE, 0, 0, slot]))
             shown, shown_at = want, now
         except Exception as e:
-            log.warning("%s: status ring update failed: %s", clock.name, e)
+            log.warning("%s: %s update failed: %s", clock.name, what, e)
 
 
-async def clear(clock):
-    """status_ring = false: remove a ring an earlier run left on the clock, once, then stop."""
+async def clear(clock, slot=SLOT):
+    """Turned off in config: remove a ring an earlier run left on the clock, once, then stop."""
     while not clock.connected:
         await asyncio.sleep(20)
-    await clock.write(bytes([SCENES_DELETE, 0, 0, SLOT]))
+    await clock.write(bytes([SCENES_DELETE, 0, 0, slot]))
