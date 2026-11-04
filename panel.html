@@ -602,7 +602,7 @@ const RING_OUT = 170, RING_DEPTH = 18.1, RINGS = [0, 1, 2, 3];
 const DAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const KIND = { pickup: "Pickup", timer: "Timer", stop: "Hard stop", stages: "Staged timer" };
 const RING_FROM = { pickup: 10, timer: null, stop: 30, stages: null };  // minutes before due the ring starts, as in pickups.py
-const TIMER_COLOR = "#e8eefc";  // the clock's Timer has no colour field; its firmware colour isn't confirmed yet
+const TIMER_COLOR = "#3ccf4e";  // the clock's Timer has no colour field; its firmware draws the countdown green
 const faceLeds = RINGS.map(() => []), faceKey = RINGS.map(() => Array(48).fill("")), hourDots = [];
 let faceMatrix;
 (function buildFace() {
