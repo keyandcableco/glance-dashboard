@@ -435,7 +435,7 @@ def make_app(clocks, shop_url=None):
         if name == "change":
             return "/change", {k: args.get(k) for k in ("what", "new_label", "minutes", "at", "add_minutes", "move_to")} | target
         if name in ("clock_in", "clock_out"):
-            return "/shopclock", {"in": name == "clock_in", **target}
+            return "/shopclock", {"in": name == "clock_in", "done": args.get("done", ""), **target}
         if name == "switch_job":
             return "/shopapi", {"path": "/api/clock/job", "body": {"text": args["text"]}, **target}
         if name == "wait_on_customer":
@@ -511,8 +511,21 @@ def make_app(clocks, shop_url=None):
         where = f"On the {clock.name} clock: " if clock is not default else ""
         return f"Changed. {where}{clockvoice.spoken_due(item)}"
 
-    async def shop_clock(clock_in):
-        """Clock in or out through the shop app's desk-button API (GET /api/clock, POST /api/clock/toggle)."""
+    async def shop_clock(clock_in, done=""):
+        """Clock in or out through the shop app's desk-button API (GET /api/clock, POST /api/clock/toggle).
+        A clock-out with what was done goes to POST /api/clock/out {"text"}: the shop app logs it on the
+        instrument's work log when the session was all on one, else keeps the words for its split page.
+        It may wait on Haiku rewording the words, hence the longer wait."""
+        if not clock_in and done.strip():
+            try:
+                status, answer = await shopapp.call(shop_url, "POST", "/api/clock/out", {"text": done.strip()},
+                                                    timeout=40)
+            except shopapp.ERRORS:
+                return "I couldn't reach the shop app. Check the clock there before trying again."
+            if 200 <= status < 300 and answer.get("say"):
+                return str(answer["say"])
+            if status != 404:  # an older shop app without it toggles below, without the words
+                return "The shop app couldn't clock out."
         status, state = await shopapp.call(shop_url, "GET", "/api/clock")
         if status == 404:
             return "The shop app doesn't have the clock in and out feature yet."
@@ -556,7 +569,7 @@ def make_app(clocks, shop_url=None):
                 if not shop_url:
                     reply = "There's no shop app set up in the config."
                 else:
-                    reply = await shop_clock(args["in"])
+                    reply = await shop_clock(args["in"], args.get("done", ""))
                     if reply.startswith("Clocked"):
                         await clock.alert("voice", text="{clock} " + ("CLOCKED IN" if args["in"] else "CLOCKED OUT"),
                                           color="White", sound="NoneSound", priority="critical")

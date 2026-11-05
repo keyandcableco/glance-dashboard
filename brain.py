@@ -19,7 +19,8 @@ transcribed from speech across a workshop, so expect missing punctuation and mis
 the likely meaning. Times: give `minutes` for a duration from now ("in half an hour" = 30, "45 seconds" = 0.75) or `at` \
 as 24-hour HH:MM for a clock time ("after lunch" = 13:00, "end of day" = 17:00); set the other to 0 or \
 empty. Timer, pickup and stop labels are short (a few words) and in capitals; text for the shop app \
-(switch_job, wait_on_customer, customer_replied) stays as said, so names still match. `clock` is empty unless the speaker \
+(switch_job, wait_on_customer, customer_replied) stays as said, so names still match, and clock_out's \
+`done` is what the speaker says they did, in their own words. `clock` is empty unless the speaker \
 names one of the clocks (for change and cancel: the clock the item is on; move_to is where it goes). \
 For change and cancel, `what` is words copied from that item's text under "Set now", times as \
 written there (12-hour, e.g. 2:30). "More time", "snooze" and "five more minutes" are add_minutes, \
@@ -86,7 +87,9 @@ def tools(clock_names):
         tool("customer_replied", "A customer got back about something the speaker was waiting on.",
              {"text": {"type": "string", "description": "Who/which instrument, e.g. Sam about the Juno"}}),
         tool("clock_in", "Clock in: start the shop's work clock.", {}),
-        tool("clock_out", "Clock out: stop the shop's work clock.", {}),
+        tool("clock_out", "Clock out: stop the shop's work clock, with what the speaker did if they say it "
+             "('clocking out, recapped the power supply on the Juno').",
+             {"done": {"type": "string", "description": "What they say they did this session, as said; else empty"}}),
         tool("clear_unread", "Clear everything waiting on the clock (only when asked to clear all of it).", {}),
     ]
 

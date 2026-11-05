@@ -23,10 +23,10 @@ log = logging.getLogger("glanced.shopapp")
 nagged = set()  # (date, follow-up id, hour); kept here so a watcher restart doesn't nag again
 
 
-async def call(url, method, path, body=None):
+async def call(url, method, path, body=None, timeout=10):
     """(HTTP status, JSON object reply) from the shop app; {} if the reply isn't a JSON object.
     Raises aiohttp.ClientError or asyncio.TimeoutError if it can't be reached."""
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as http:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as http:
         async with http.request(method, url.rstrip("/") + path, json=body) as r:
             try:
                 data = await r.json(content_type=None)
