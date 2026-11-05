@@ -178,6 +178,8 @@ an unknown `{name}`; everywhere else (email subjects, calendar titles, names) it
 
 ## Protocol notes (beyond Hypfer's write-up)
 
+The full reference, with every command, error code and setting found so far, is in [`PROTOCOL.md`](PROTOCOL.md). The essentials:
+
 - **Custom scenes** show only with a nonzero priority byte: `[0, priority, mode, slot]`. Mode 8 draws on the
   rings while keeping the digital time and date; mode 0 takes the whole display.
 - **Ring segments** pack as `color<<16 | extra<<14 | length<<8 | offset<<6 | start`: start 0 is
@@ -210,7 +212,7 @@ an unknown `{name}`; everywhere else (email subjects, calendar titles, names) it
 `glanced.py` the bridge · `glance.py` protocol helpers + one-shot CLI · `config.py` · `mailwatch.py`,
 `textwatch.py`, `calwatch.py` sources · `pickups.py` timers/pickups/stops · `unread.py` · `nudges.py` ·
 `notes.py` · `statusring.py` (and the light flash) · `schedulering.py` · `forecast.py` · `animscreen.py` · `screensaver.py` · `screens.py` · `calendars.py` · `ringwords.py` words on the rings · `shopapp.py` optional shop app · `brain.py` Haiku · `clockvoice.py` voice front end · `panel.html` · `pickup` CLI ·
-`set_setting.py` · `contrib/`
+`set_setting.py` · `contrib/` · `PROTOCOL.md` the protocol reference
 
 ## License
 
