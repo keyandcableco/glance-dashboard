@@ -152,7 +152,7 @@
   .chip.on { background: var(--ink); border-color: var(--ink); color: var(--page); }
   .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
   .field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 500; color: var(--ink-2); min-width: 0; }
-  input[type=text], input[type=number], input[type=time], select {
+  input[type=text], input[type=url], input[type=number], input[type=time], select {
     font: 16px var(--sans); color: var(--ink); background: var(--field); border: 1px solid var(--line-2); border-radius: 12px;
     min-height: 46px; padding: 0 14px; width: 100%; margin: 0; }
   textarea { font: 15px/1.6 var(--mono); color: var(--ink); background: var(--field); border: 1px solid var(--line-2);
@@ -228,6 +228,7 @@
   .icons::-webkit-scrollbar { display: none; }
   .fields.half { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .fields.pick { grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); }
+  .fields.cal { grid-template-columns: minmax(0, .7fr) minmax(0, 1.3fr); }
   @media (hover: hover) and (pointer: fine) { .icons { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; padding-bottom: 8px; } }
   .ichip { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 11px; border-radius: 999px; flex: none;
            border: 1px solid var(--line); background: var(--field); color: var(--ink); font: 12.5px var(--mono); cursor: pointer; touch-action: manipulation; }
@@ -259,6 +260,7 @@
     .actions .btn.primary { flex: 1 1 auto; }
     .actions .grow { display: none; }
     .btn.sm { padding: 0 12px; }
+    .fields.cal { grid-template-columns: minmax(0, 1fr); }
   }
   @media (max-width: 340px) {
     .hero { grid-template-columns: 1fr; }
@@ -494,6 +496,18 @@
         <div class="sh"><h2 class="dm" id="hScreens" data-dm="SCREENS">Screens</h2></div>
         <ul class="list" id="screens"></ul>
         <p class="hint">The clock shows these in turn, about 15 seconds each, and picks the next one itself (often the same one again). The weather is on only a couple of minutes in every ten. A switch takes effect within half a minute, or once an alert that&rsquo;s showing is over.</p>
+      </section>
+
+      <section class="panel" id="secCalendars" aria-labelledby="hCalendars">
+        <div class="sh"><h2 class="dm" id="hCalendars" data-dm="CALENDARS">Calendars</h2><span class="count" id="calCount"></span></div>
+        <ul class="list" id="calendars"></ul>
+        <div class="sub">Add a calendar</div>
+        <div class="fields cal">
+          <label class="field">Name <input type="text" id="calName" maxlength="40" placeholder="Shop" autocomplete="off"></label>
+          <label class="field">Secret address in iCal format <input type="url" id="calUrl" placeholder="https://calendar.google.com/calendar/ical/&hellip;/basic.ics" autocomplete="off" spellcheck="false" autocapitalize="off"></label>
+        </div>
+        <p class="hint">In Google Calendar on a computer: Settings, click the calendar, then Integrate calendar. Copy &ldquo;Secret address in iCal format&rdquo;. The bridge reads it once to check it, then keeps it on this computer; the panel never shows it again. Each event warns 15 and 5 minutes before and at the start, and goes on the schedule ring.</p>
+        <div class="actions end"><button class="btn primary" id="addCal">Add calendar</button></div>
       </section>
     </div>
   </div>
@@ -837,7 +851,7 @@ $("clocks").addEventListener("click", e => {
   CLOCK = b.dataset.clock;
   try { localStorage.setItem("clock", CLOCK); } catch {}
   $("clocks").querySelectorAll("[data-clock]").forEach(x => x.setAttribute("aria-pressed", x === b));
-  loadStatus(); loadUnread(); loadSettings(); loadNudges(); loadScreens();
+  loadStatus(); loadUnread(); loadSettings(); loadNudges(); loadScreens(); loadCalendars();
 });
 
 async function loadStatus() {
@@ -1128,6 +1142,53 @@ $("screens").addEventListener("change", async e => {
   } catch (err) { toast("Not changed: " + err.message, true); loadScreens(); }
 });
 
+// ---- calendars ----
+function renderCalendars(list) {  // what GET /calendars says, or null when it can't be read
+  $("calCount").textContent = list && list.length ? list.length : "";
+  if (!list) { $("calendars").innerHTML = `<li class="empty">Unknown: the bridge isn't answering.</li>`; return; }
+  $("calendars").innerHTML = list.length ? list.map(c => {
+    const state = c.error ? `<span class="late">${esc(c.error)}</span>`
+      : c.events === null ? "not read yet" : `${c.events} event${c.events === 1 ? "" : "s"} in the next 24 h`;
+    const meta = [c.host && esc(c.host), c.config ? "from config.toml" : "", state].filter(Boolean).join(" · ");
+    return `<li class="item"><span class="cled ${c.error ? "off" : c.events === null ? "" : "on"}"></span>
+      <div class="itext"><div class="t">${esc(c.name)}</div><div class="meta">${meta}</div></div>
+      <button class="btn sm ghost" data-cal="${esc(c.id)}" data-name="${esc(c.name)}" data-config="${c.config ? 1 : ""}" aria-label="Remove calendar: ${esc(c.name)}">Remove</button></li>`;
+  }).join("") : `<li class="empty">No calendars on this clock.</li>`;
+}
+async function loadCalendars() {
+  const asked = CLOCK;
+  let list = null;
+  try { list = await api("/calendars"); } catch {}
+  if (CLOCK === asked) renderCalendars(list);
+}
+$("calendars").addEventListener("click", async e => {
+  const b = e.target.closest("[data-cal]"); if (!b) return;
+  const name = b.dataset.name, asked = CLOCK;
+  if (!confirm(b.dataset.config
+    ? `Stop using "${name}" on this clock? It stays in config.toml and its url_file; add its address here to use it again.`
+    : `Remove "${name}" from this clock? The bridge forgets its address; you'd paste it again to add it back.`)) return;
+  b.disabled = true;
+  try {
+    const list = await api("/calendars", { remove: b.dataset.cal });
+    if (CLOCK === asked) renderCalendars(list);
+    toast(`${name} removed`);
+  } catch (err) { toast("Not removed: " + err.message, true); loadCalendars(); }
+});
+$("addCal").onclick = async () => {
+  const name = $("calName").value.trim(), url = $("calUrl").value.trim(), asked = CLOCK;
+  if (!name || !url) { toast(name ? "Paste the calendar's secret address" : "Give the calendar a name", true); (name ? $("calUrl") : $("calName")).focus(); return; }
+  const b = $("addCal"); b.disabled = true; b.textContent = "Checking…";
+  try {
+    const list = await api("/calendars", { add: { name, url } });
+    $("calName").value = ""; $("calUrl").value = "";
+    if (CLOCK === asked) renderCalendars(list);
+    const added = list.find(c => c.name.toLowerCase() === name.replace(/\s+/g, " ").toLowerCase());
+    toast(added && added.events !== null ? `${added.name} added: ${added.events} event${added.events === 1 ? "" : "s"} in the next 24 h` : `${name} added`);
+  } catch (err) { toast("Not added: " + err.message, true); }
+  finally { b.disabled = false; b.textContent = "Add calendar"; }
+};
+[$("calName"), $("calUrl")].forEach(i => i.addEventListener("keydown", e => { if (e.key === "Enter") $("addCal").click(); }));
+
 // ---- notes ----
 async function loadNotes() {
   const all = await api("/notes").catch(() => []);
@@ -1209,8 +1270,8 @@ function dmHeading(h, dm, label) { h.dataset.dm = dm; h.innerHTML = dmSVG(dm) + 
 document.querySelectorAll("[data-dm]").forEach(h => dmHeading(h, h.dataset.dm, h.textContent));
 showBrightness(); drawQuiet(); preview(); showKind(); drawFace();
 renderScreens(null);
-loadOptions(); loadNotes(); loadStatus().then(() => { loadUnread(); loadSettings(); loadNudges(); loadScreens(); });
-setInterval(() => { loadStatus(); loadUnread(); loadNotes(); loadScreens(); api("/nudges").then(showSnooze).catch(() => {}); }, 10000);
+loadOptions(); loadNotes(); loadStatus().then(() => { loadUnread(); loadSettings(); loadNudges(); loadScreens(); loadCalendars(); });
+setInterval(() => { loadStatus(); loadUnread(); loadNotes(); loadScreens(); loadCalendars(); api("/nudges").then(showSnooze).catch(() => {}); }, 10000);
 let shownHour = new Date().getHours();
 setInterval(() => {
   drawFace(); renderFacts(); updateDues();

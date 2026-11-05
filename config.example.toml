@@ -30,10 +30,12 @@ rules = [
 [clocks.office.texts]
 names = ["Alex"]
 
-# Optional: warnings before Google Calendar events. Put the calendar's
+# Optional: warnings before Google Calendar events. Calendars are easiest to add and remove on the panel
+# (kept in calendars-<name>.json, git-ignored). One can also start here: put the calendar's
 # "Secret address in iCal format" in this file (one line, git-ignored).
-[clocks.office.calendar]
-url_file = "calendar_url"
+# [clocks.office.calendar]
+# url_file = "calendar_url"
+# name = "Calendar"   # what the panel calls it
 
 # Optional: a 24-hour forecast drawn around the ring.
 [clocks.office.forecast]

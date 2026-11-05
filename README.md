@@ -18,8 +18,9 @@ of his `Glance.proto`, fixed so `protoc` accepts it. Everything here builds on t
 - **Alerts** on the 32×8 display and the four 48-LED rings: text, built-in icons, color, animation, sound,
   priority. Long text is split into pieces the clock shows in turn.
 - **Sources**, per clock: new emails in a Thunderbird inbox matching subject rules; desktop notifications
-  from chosen people (e.g. texts via Google Messages for Web); Google Calendar events (15 min, 5 min, now);
-  anything that can `curl` (a Claude Code hook is in `contrib/`).
+  from chosen people (e.g. texts via Google Messages for Web); Google Calendar events (15 min, 5 min, now)
+  from any number of calendars, added and removed on the panel; anything that can `curl` (a Claude Code
+  hook is in `contrib/`).
 - **Timers, pickups and hard stops**, with the clock's own **ring countdown**. A hard stop nags at 30, 15
   and 5 minutes, then repeats "STOP NOW" every 5 minutes for half an hour unless cleared.
 - **Light flash** for anything due now (a timer, pickup or stop going off, a calendar event starting): all
@@ -118,7 +119,7 @@ To use the panel from another device, put a password in `panel_password` (any us
 the bridge. Without that file, only the computer running the bridge can use the panel and API. It's plain
 HTTP: use it on a network you trust, or over a VPN such as Tailscale. Requests from the bridge's own computer
 skip the password, so don't put a reverse proxy on that computer in front of it (every request would look
-local). Web pages open in your browser can't use that shortcut: other sites' requests are refused.
+local). Pages from other sites open in a browser are refused, on this computer or another, even with the password saved.
 
 ### A shop app (optional)
 
@@ -152,6 +153,7 @@ All on `http://127.0.0.1:8740`; every call takes an optional `clock` (name), def
 | `GET/POST /notes` | `text` to add; `id` with `done` or `delete` | |
 | `GET/POST /settings` | `brightness, night_mode, dnd, dnd_from, dnd_till` | The clock's own settings |
 | `GET/POST /nudges` | `breaks, break_minutes, pause_minutes, closing, closing_days, snooze_minutes` | |
+| `GET/POST /calendars` | `add: {name, url}` (a secret iCal address, checked by reading it once) or `remove: id` | A clock's calendars by name and host; the addresses stay in `calendars-<name>.json` (mode 0600) and are never sent back |
 | `GET/POST /screens` | `status, forecast, schedule, animation, screensaver` (each `true` or `false`) | Which screens the clock shows in turn; applied within half a minute |
 | `GET /status`, `GET /options` | | Connection, unread counts, the active stretch toward a break nudge (`focus`); the names of colors, sounds, icons |
 
@@ -191,7 +193,7 @@ an unknown `{name}`; everywhere else (email subjects, calendar titles, names) it
 
 `glanced.py` the bridge · `glance.py` protocol helpers + one-shot CLI · `config.py` · `mailwatch.py`,
 `textwatch.py`, `calwatch.py` sources · `pickups.py` timers/pickups/stops · `unread.py` · `nudges.py` ·
-`notes.py` · `statusring.py` (and the light flash) · `schedulering.py` · `forecast.py` · `animscreen.py` · `screensaver.py` · `screens.py` · `shopapp.py` optional shop app · `brain.py` Haiku · `clockvoice.py` voice front end · `panel.html` · `pickup` CLI ·
+`notes.py` · `statusring.py` (and the light flash) · `schedulering.py` · `forecast.py` · `animscreen.py` · `screensaver.py` · `screens.py` · `calendars.py` · `shopapp.py` optional shop app · `brain.py` Haiku · `clockvoice.py` voice front end · `panel.html` · `pickup` CLI ·
 `set_setting.py` · `contrib/`
 
 ## License

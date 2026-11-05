@@ -22,6 +22,7 @@ from bless import BlessServer, GATTAttributePermissions, GATTCharacteristicPrope
 
 import animscreen
 import brain
+import calendars
 import calwatch
 import forecast
 import shopapp
@@ -276,7 +277,8 @@ def same_site(request):
 
 def password_check():
     """Requests from this machine pass (see same_site); anything from the network needs HTTP Basic
-    auth with the panel password (any username). With no panel_password file, network requests are
+    auth with the panel password (any username), and a browser's Origin, if sent, must be the panel's own
+    page (a saved password mustn't let another site's page post). With no panel_password file, network requests are
     refused. A reverse proxy on this machine would make every request look local: don't put one in front."""
     try:
         password = open(PASSWORD_FILE).read().strip().encode()
@@ -290,6 +292,9 @@ def password_check():
             if not same_site(request):
                 return web.Response(status=403, text="not from this machine's own pages")
             return await handler(request)
+        origin = request.headers.get("Origin")
+        if origin is not None and origin != f"http://{request.host}":  # another site's page using saved credentials
+            return web.Response(status=403, text="not from the panel's own page")
         auth = request.headers.get("Authorization", "")
         if auth.startswith("Basic "):
             try:
@@ -668,6 +673,39 @@ def make_app(clocks, shop_url=None):
         log.info("%s: screens: %s", clock.name, changes)
         return web.json_response(clock.screens.json())
 
+    async def get_calendars(request):
+        return web.json_response(pick(request).calendars.json())
+
+    async def set_calendars(request):
+        """{"add": {"name", "url"}}: the secret iCal address is read once to check it's a calendar, then kept
+        on this machine only; or {"remove": id}. Returns the clock's calendars by name and host, never an address."""
+        body = await read_body(request)
+        clock = pick(request, body)
+        cals = clock.calendars
+        try:
+            if isinstance(body.get("add"), dict):
+                name, url = cals.check(body["add"].get("name"), body["add"].get("url"))
+                try:
+                    events = await calwatch.check(url)
+                except Exception as e:
+                    return web.json_response({"error": f"couldn't read a calendar there: {calwatch.why(e)}"}, status=400)
+                entry = cals.add(name, url)
+                cals.status[entry["id"]] = {"events": len(events), "error": None, "fetched": time.time()}
+                log.info("%s: calendar %r added, %d events in the next 24 h", clock.name, name, len(events))
+            elif isinstance(body.get("remove"), str):
+                name = cals.name(body["remove"])
+                cals.remove(body["remove"])
+                log.info("%s: calendar %r removed", clock.name, name)
+            else:
+                return web.json_response({"error": 'send {"add": {"name", "url"}} or {"remove": id}'}, status=400)
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        except KeyError:
+            return web.json_response({"error": "no such calendar on this clock"}, status=404)
+        except OSError as e:
+            return web.json_response({"error": f"couldn't save: {e.strerror or type(e).__name__}"}, status=500)
+        return web.json_response(cals.json())
+
     async def options(request):
         from glance import ICONS
         return web.json_response({"colors": list(pb.Color.keys()), "animations": list(pb.Animation.keys()),
@@ -681,7 +719,7 @@ def make_app(clocks, shop_url=None):
     app.add_routes([web.post("/notify", notify), web.get("/status", status),
                     web.get("/unread", list_unread), web.post("/unread/clear", clear_unread),
                     web.get("/settings", get_settings), web.post("/settings", set_settings),
-                    web.get("/options", options), web.post("/pickup", add_pickup), web.post("/stages", add_stages), web.post("/voice", voice), web.get("/nudges", get_nudges), web.get("/notes", list_notes), web.post("/notes", change_note), web.post("/nudges", set_nudges), web.get("/screens", get_screens), web.post("/screens", set_screens), web.get("/", panel)])
+                    web.get("/options", options), web.post("/pickup", add_pickup), web.post("/stages", add_stages), web.post("/voice", voice), web.get("/nudges", get_nudges), web.get("/notes", list_notes), web.post("/notes", change_note), web.post("/nudges", set_nudges), web.get("/screens", get_screens), web.post("/screens", set_screens), web.get("/calendars", get_calendars), web.post("/calendars", set_calendars), web.get("/", panel)])
     return app
 
 
@@ -705,6 +743,7 @@ async def main():
         clock = clocks[name] = Clock(name, c["address"])
         clock.nudges = nudges.Settings(name, c.get("nudges"))
         clock.screens = screens.Screens(name, c)
+        clock.calendars = calendars.Calendars(name, c)
         watchers = {"connection": clock.keep_connected, "replay": lambda clock=clock: unread.replay(clock),
                     "pickups": lambda clock=clock: pickups.watch(clock), "nudges": lambda clock=clock: nudges.watch(clock),
                     "ring": lambda clock=clock: statusring.watch(clock), "schedule": lambda clock=clock: schedulering.watch(clock),
@@ -714,8 +753,7 @@ async def main():
             watchers["mail"] = lambda clock=clock, c=c: mailwatch.watch(clock, c["mail"])
         if "texts" in c:
             watchers["texts"] = lambda clock=clock, c=c: textwatch.watch(clock, c["texts"])
-        if "calendar" in c:
-            watchers["calendar"] = lambda clock=clock, c=c: calwatch.watch(clock, c["calendar"])
+        watchers["calendar"] = lambda clock=clock: calwatch.watch(clock)  # calendars can be added on the panel
         # without a [forecast] section it only makes sure no forecast is left on the clock
         watchers["forecast"] = lambda clock=clock, c=c: forecast.watch(clock, c.get("forecast") or {})
         if not tasks and cfg.get("shop_app", {}).get("url"):  # follow-up nags go to the first clock
