@@ -10,6 +10,7 @@ calendar_fired-*.json
 nudges-*.json
 screens-*.json
 calendars-*
+message-*.json
 notes.json
 pickups-sync.json
 *.tmp

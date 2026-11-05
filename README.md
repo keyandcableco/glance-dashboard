@@ -48,6 +48,11 @@ of his `Glance.proto`, fixed so `protoc` accepts it. Everything here builds on t
   clock's own animations (fire, flowers, fan, wheel, sun, storm, clouds) in changing colours; rain, snow
   and fog; drawn ones where every LED has its own colour (a rainbow with a wave over it, confetti, a
   sweep, a rainbow painting itself in).
+- **Words on the rings**: type a top and a bottom line on the panel and they're drawn in letters round the
+  four rings (a 3×4 font, about 6 letters a half; the bottom line is turned over so it reads upright). It
+  takes the whole face at once, time and date too, for the minutes you pick or until you clear it. High,
+  highest and critical alerts still show over it and it comes back after; low and medium ones wait. The
+  bridge takes it off, so if the bridge stops while words are up, they stay until it's back.
 - **Screens**: the clock shows its time and date, the status ring, the forecast, the schedule ring, the
   animation screen and the screensaver in turn, about 15 seconds each (the clock picks the next one, often
   the same one again). Switch each of the last five on or off per clock on the panel (it's kept in
@@ -164,6 +169,7 @@ All on `http://127.0.0.1:8740`; every call takes an optional `clock` (name), def
 | `GET/POST /settings` | `brightness, night_mode, dnd, dnd_from, dnd_till` | The clock's own settings |
 | `GET/POST /nudges` | `breaks, break_minutes, pause_minutes, closing, closing_days, snooze_minutes` | |
 | `GET/POST /calendars` | `add: {name, url}` (a secret iCal address, checked by reading it once) or `remove: id` | A clock's calendars by name and host; the addresses stay in `calendars-<name>.json` (mode 0600) and are never sent back |
+| `GET/POST /message` | `top, bottom, top_color, bottom_color, minutes` (default 5; 0: until cleared), or `clear: true` | Words on the rings, taking the whole face now; up to 16 characters a line |
 | `GET/POST /screens` | `status, forecast, schedule, animation, screensaver` (each `true` or `false`) | Which screens the clock shows in turn; applied within half a minute |
 | `GET /status`, `GET /options` | | Connection, unread counts, the active stretch toward a break nudge (`focus`); the names of colors, sounds, icons |
 
@@ -203,7 +209,7 @@ an unknown `{name}`; everywhere else (email subjects, calendar titles, names) it
 
 `glanced.py` the bridge · `glance.py` protocol helpers + one-shot CLI · `config.py` · `mailwatch.py`,
 `textwatch.py`, `calwatch.py` sources · `pickups.py` timers/pickups/stops · `unread.py` · `nudges.py` ·
-`notes.py` · `statusring.py` (and the light flash) · `schedulering.py` · `forecast.py` · `animscreen.py` · `screensaver.py` · `screens.py` · `calendars.py` · `shopapp.py` optional shop app · `brain.py` Haiku · `clockvoice.py` voice front end · `panel.html` · `pickup` CLI ·
+`notes.py` · `statusring.py` (and the light flash) · `schedulering.py` · `forecast.py` · `animscreen.py` · `screensaver.py` · `screens.py` · `calendars.py` · `ringwords.py` words on the rings · `shopapp.py` optional shop app · `brain.py` Haiku · `clockvoice.py` voice front end · `panel.html` · `pickup` CLI ·
 `set_setting.py` · `contrib/`
 
 ## License

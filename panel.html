@@ -229,6 +229,16 @@
   .fields.half { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .fields.pick { grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); }
   .fields.cal { grid-template-columns: minmax(0, .7fr) minmax(0, 1.3fr); }
+
+  /* words on the rings: a dial showing what the clock will show, beside the two lines */
+  .rw { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 22px; align-items: center; margin-top: 16px; }
+  .rw svg { width: 150px; height: 150px; display: block; }
+  .rw.ghost #rwLeds { opacity: .4; }
+  .fields.rwl { grid-template-columns: minmax(0, 1fr) minmax(0, 10.5em); gap: 12px 10px; }
+  .rwl input[type=text] { text-transform: uppercase; font-family: var(--mono); letter-spacing: .05em; }
+  .rwnote { min-height: 1.5em; margin: 10px 0 0; font-size: 13px; color: var(--ink-2); }
+  .rwnote.bad { color: var(--bad); }
+  .stays { flex-direction: row; align-items: center; gap: 10px; }
   @media (hover: hover) and (pointer: fine) { .icons { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; padding-bottom: 8px; } }
   .ichip { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 11px; border-radius: 999px; flex: none;
            border: 1px solid var(--line); background: var(--field); color: var(--ink); font: 12.5px var(--mono); cursor: pointer; touch-action: manipulation; }
@@ -261,6 +271,9 @@
     .actions .grow { display: none; }
     .btn.sm { padding: 0 12px; }
     .fields.cal { grid-template-columns: minmax(0, 1fr); }
+    .rw { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+    .rw svg { width: 150px; height: 150px; margin: 0 auto; }
+    .fields.rwl { grid-template-columns: minmax(0, 1fr) minmax(0, 9.5em); }
   }
   @media (max-width: 340px) {
     .hero { grid-template-columns: 1fr; }
@@ -467,6 +480,36 @@
         </div>
         <p class="hint">The light flash runs all four rings red and white for 3 seconds before the text, as for anything due now. Text mode only applies to text that fits in one piece (about 30 characters); longer text shows each piece once.</p>
       </section>
+
+      <section class="panel" id="secWords" aria-labelledby="hWords">
+        <div class="sh"><h2 class="dm" id="hWords" data-dm="RING WORDS">Words on the rings</h2></div>
+        <div class="snooze"><span class="cled" id="rwLed"></span><span id="rwState">Nothing on the rings</span></div>
+        <div class="rw ghost" id="rw">
+          <svg viewBox="-200 -200 400 400" aria-hidden="true">
+            <circle r="197" class="f-body"/>
+            <circle r="187" fill="url(#gGlass)" class="f-glass"/>
+            <g id="rwLeds" filter="url(#glow)"></g>
+            <circle r="6.5" class="hub"/>
+          </svg>
+          <div class="fields rwl">
+            <label class="field">Top line <input type="text" id="rwTop" maxlength="16" placeholder="Glance" autocomplete="off" spellcheck="false"></label>
+            <label class="field">Color <span class="sel sw"><i id="rwTopSw"></i><select id="rwTopColor"></select></span></label>
+            <label class="field">Bottom line <input type="text" id="rwBottom" maxlength="16" placeholder="Clock" autocomplete="off" spellcheck="false"></label>
+            <label class="field">Color <span class="sel sw"><i id="rwBottomSw"></i><select id="rwBottomColor"></select></span></label>
+          </div>
+        </div>
+        <p class="rwnote" id="rwNote" aria-live="polite"></p>
+        <div class="actions">
+          <label class="field stays">Stays <span class="sel"><select id="rwFor">
+            <option value="1">1 minute</option><option value="5" selected>5 minutes</option><option value="15">15 minutes</option>
+            <option value="60">1 hour</option><option value="240">4 hours</option><option value="0">Until cleared</option>
+          </select></span></label>
+          <span class="grow"></span>
+          <button class="btn" id="rwClear" disabled>Clear</button>
+          <button class="btn primary" id="rwShow">Show now</button>
+        </div>
+        <p class="hint">Takes over the whole face, the time and date too, until the time&rsquo;s up or you clear it. High, highest and critical alerts still come through, and the words come back after; low and medium ones wait until they&rsquo;re off. Letters, digits, spaces and &amp; ! ? - : *, and &lt;3 for a heart. About 6 letters fit on each half; longer lines run down the sides and read sideways.</p>
+      </section>
     </div>
 
     <div class="col">
@@ -598,7 +641,7 @@ function matrix(parent, x0, y0, pitch, r) {  // a live 32x8 matrix; returns show
 
 // ---- LED colors: the clock's color names are CSS names; a few get brighter LED tones ----
 const LED_TONE = { Black: null, White: "#f4f1ea", LightSlateBlue: "#8470ff", Blue: "#2f5bff", Indigo: "#6b3fd6", DarkGreen: "#1f9a45", Maroon: "#b3343e",
-  DarkMagenta: "#b0249c", Brown: "#b5522f", Olive: "#a3a32c" };
+  DarkMagenta: "#b0249c", Brown: "#b5522f", Olive: "#a3a32c", Google21: "#9a6cff" };  // Google21: violet on the clock
 function led(name) {
   if (!name) return "#a0a8b0";
   if (name in LED_TONE) return LED_TONE[name];
@@ -670,7 +713,7 @@ function mmss(sec) {
 const inQuiet = (h, a, b) => a !== b && (a < b ? h >= a && h < b : h >= a || h < b);
 
 // what the panel knows, for the drawing and the readout
-const S = { bridge: null, status: null, unread: [], settings: null, nudges: null, screens: null };
+const S = { bridge: null, status: null, unread: [], settings: null, nudges: null, screens: null, message: null };
 
 // ---- the clock face, measured from photos of the real one (radius 197 = bezel edge), outside in:
 // 12 hour dots in the margin; four contiguous bands of 48 near-square cells from r 170 in to r 97.6, ring 0 outermost;
@@ -682,8 +725,32 @@ const RING_FROM = { pickup: 10, timer: null, stop: 30, stages: null };  // minut
 const TIMER_COLOR = "#3ccf4e", TIMER_MIN_COLOR = "#ffc23d";  // the Timer has no colour field: the clock draws seconds green, minutes yellow
 const ITEM_PX = 3, ITEM_GAP = 1, ITEM_MAX = 12;  // statusring.py: one 3-LED segment per unread item from 12 o'clock, the oldest 12
 const ARC_STEPS = 12, FOCUS_WARN = 0.8;  // statusring.py: the active stretch on the inner ring, green then orange
-const faceLeds = RINGS.map(() => []), faceKey = RINGS.map(() => Array(48).fill("")), hourDots = [];
+const faceLeds = [], hourDots = [];
 let faceMatrix;
+function ringCells(g) {  // the four bands of 48 cells: LED 0 starts at 12 o'clock and runs clockwise; thin seams between cells
+  const f = n => n.toFixed(2);
+  return RINGS.map(k => {
+    const ro = RING_OUT - k * RING_DEPTH - .6, ri = RING_OUT - (k + 1) * RING_DEPTH + .6;
+    return Array.from({ length: 48 }, (_, i) => {
+      const a0 = i * 7.5 + .35, a1 = (i + 1) * 7.5 - .35, [x0, y0] = pt(ro, a0), [x1, y1] = pt(ro, a1), [x2, y2] = pt(ri, a1), [x3, y3] = pt(ri, a0);
+      const c = document.createElementNS(NS, "path");
+      c.setAttribute("d", `M${f(x0)} ${f(y0)}A${f(ro)} ${f(ro)} 0 0 1 ${f(x1)} ${f(y1)}L${f(x2)} ${f(y2)}A${f(ri)} ${f(ri)} 0 0 0 ${f(x3)} ${f(y3)}Z`);
+      c.setAttribute("class", "led");
+      return g.appendChild(c);
+    });
+  });
+}
+function ledSetter(cells) {  // set(k, i, v) for those cells, v: null (off) or [color, opacity, pulsing]
+  const keys = RINGS.map(() => Array(48).fill(""));
+  return (k, i, v) => {
+    const key = v ? v[0] + v[1].toFixed(2) + (v[2] ? "p" : "") : "";
+    if (keys[k][i] === key) return;
+    keys[k][i] = key;
+    cells[k][i].style.fill = v ? v[0] : "";
+    cells[k][i].style.fillOpacity = v ? v[1] : "";
+    cells[k][i].classList.toggle("pulse", !!(v && v[2]));
+  };
+}
 (function buildFace() {
   const g = $("faceLeds");
   const dot = (r, a, size, cls) => {
@@ -692,28 +759,11 @@ let faceMatrix;
     return g.appendChild(c);
   };
   for (let h = 0; h < 12; h++) hourDots.push(dot(178, h * 30, 3.6, "hdot"));
-  RINGS.forEach(k => {  // LED 0 starts at 12 o'clock and runs clockwise; thin seams between cells
-    const ro = RING_OUT - k * RING_DEPTH - .6, ri = RING_OUT - (k + 1) * RING_DEPTH + .6, f = n => n.toFixed(2);
-    for (let i = 0; i < 48; i++) {
-      const a0 = i * 7.5 + .35, a1 = (i + 1) * 7.5 - .35, [x0, y0] = pt(ro, a0), [x1, y1] = pt(ro, a1), [x2, y2] = pt(ri, a1), [x3, y3] = pt(ri, a0);
-      const c = document.createElementNS(NS, "path");
-      c.setAttribute("d", `M${f(x0)} ${f(y0)}A${f(ro)} ${f(ro)} 0 0 1 ${f(x1)} ${f(y1)}L${f(x2)} ${f(y2)}A${f(ri)} ${f(ri)} 0 0 0 ${f(x3)} ${f(y3)}Z`);
-      c.setAttribute("class", "led");
-      faceLeds[k].push(g.appendChild(c));
-    }
-  });
+  faceLeds.push(...ringCells(g));
   faceMatrix = matrix(g.appendChild(document.createElementNS(NS, "g")), -82.9, 15.9, 5.35, 2);
   $("faceSheen").setAttribute("d", arc(182, -66, -18));
 })();
-
-function setLed(k, i, v) {  // v: null (off) or [color, opacity, pulsing]
-  const key = v ? v[0] + v[1].toFixed(2) + (v[2] ? "p" : "") : "";
-  if (faceKey[k][i] === key) return;
-  faceKey[k][i] = key;
-  faceLeds[k][i].style.fill = v ? v[0] : "";
-  faceLeds[k][i].style.fillOpacity = v ? v[1] : "";
-  faceLeds[k][i].classList.toggle("pulse", !!(v && v[2]));
-}
+const setLed = ledSetter(faceLeds);
 
 function countdown(now) {  // the countdown on the clock's ring (see refresh_ring in glanced.py)
   const t = now / 1000;
@@ -746,8 +796,10 @@ function wedge(ring, from, span, color) {  // light `span` units clockwise from 
 function drawFace(now = Date.now()) {
   const link = !!(S.bridge && S.status && S.status.connected);
   const L = RINGS.map(() => Array(48).fill(null));
-  const cd = link ? countdown(now) : null, d = new Date(now);
-  if (cd) {  // the clock's own timer face (photo, 2026-11-05): the time left as wedges from the hands to the end time
+  const words = link ? rwShowing(now) : null, cd = link && !words ? countdown(now) : null, d = new Date(now);
+  if (words) {  // mode 0 takes the whole face: the words on the rings, the text line dark
+    words.forEach((ring, k) => ring.forEach((c, i) => { if (c) L[k][i] = [led(c), 1]; }));
+  } else if (cd) {  // the clock's own timer face (photo, 2026-11-05): the time left as wedges from the hands to the end time
     const sec = d.getSeconds() + d.getMilliseconds() / 1000, min = d.getMinutes() + sec / 60;
     wedge(L[1], min, Math.floor(cd.left / 60), TIMER_MIN_COLOR);  // whole minutes left, from the minute hand, 60 minutes a turn
     wedge(L[0], sec, cd.left % 60, TIMER_COLOR);  // the seconds over whole minutes, from the current second, 60 a turn
@@ -767,14 +819,14 @@ function drawFace(now = Date.now()) {
   const s = S.settings;
   hourDots.forEach(e => e.style.display = s && s.night_mode ? "none" : "");  // night mode hides them, as on the clock
   const left = cd && Math.ceil(cd.left);
-  faceMatrix(textCols(cd ? `${String(Math.floor(left / 60)).padStart(2, "0")}:${String(left % 60).padStart(2, "0")}` : `${DAY[d.getDay()]} ${d.getDate()}`));
+  faceMatrix(words ? [] : textCols(cd ? `${String(Math.floor(left / 60)).padStart(2, "0")}:${String(left % 60).padStart(2, "0")}` : `${DAY[d.getDay()]} ${d.getDate()}`));
   const m = d.getMinutes() + d.getSeconds() / 60, ha = `rotate(${((d.getHours() % 12 + m / 60) * 30).toFixed(2)})`, ma = `rotate(${(m * 6).toFixed(2)})`;
   ["hh", "hhS"].forEach(id => $(id).setAttribute("transform", ha));
   ["mh", "mhS"].forEach(id => $(id).setAttribute("transform", ma));
   let level = s ? (s.brightness === 0 ? .78 : .55 + .45 * s.brightness / 255) * (s.night_mode ? .65 : 1) : 1;
   $("faceLeds").style.opacity = link ? level : .45;
   const say = [S.status ? S.status.name + " clock" : "Clock", d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }), $("conn").textContent.toLowerCase(),
-    S.unread.length + " unread", cd ? itemLabel(cd.item) + ", " + span(cd.left) + " left" : ""].filter(Boolean).join(", ");
+    S.unread.length + " unread", cd ? itemLabel(cd.item) + ", " + span(cd.left) + " left" : "", words ? "showing " + rwWords(S.message.showing) : ""].filter(Boolean).join(", ");
   if ($("faceSvg").getAttribute("aria-label") !== say) $("faceSvg").setAttribute("aria-label", say);
 }
 
@@ -851,7 +903,7 @@ $("clocks").addEventListener("click", e => {
   CLOCK = b.dataset.clock;
   try { localStorage.setItem("clock", CLOCK); } catch {}
   $("clocks").querySelectorAll("[data-clock]").forEach(x => x.setAttribute("aria-pressed", x === b));
-  loadStatus(); loadUnread(); loadSettings(); loadNudges(); loadScreens(); loadCalendars();
+  loadStatus(); loadUnread(); loadSettings(); loadNudges(); loadScreens(); loadCalendars(); loadMessage();
 });
 
 async function loadStatus() {
@@ -908,6 +960,7 @@ async function loadOptions() {
     fill($("sound"), o.sounds, "NoneSound"); fill($("priority"), o.priorities, "high");
     $("icons").innerHTML = o.icons.map(i => `<button type="button" class="ichip" data-icon="${esc(i)}" title="Insert {${esc(i)}}">${dmSVG(`{${i}}`, 1.75, .78)}<span>${esc(i)}</span></button>`).join("");
     looks();
+    RW_FONT = o.ring_font || null; rwPreview(); drawFace();
   } catch (e) { toast("Couldn't read options: " + e.message, true); }
 }
 
@@ -1189,6 +1242,99 @@ $("addCal").onclick = async () => {
 };
 [$("calName"), $("calUrl")].forEach(i => i.addEventListener("keydown", e => { if (e.key === "Enter") $("addCal").click(); }));
 
+// ---- words on the rings (GET/POST /message): ringwords.py's 3x4 font comes with /options, laid out as it lays it out ----
+const RW_COLORS = [["Aqua", "Aqua"], ["Red", "Red"], ["SkyBlue", "Sky blue"], ["Lime", "Lime"], ["Darkorange", "Orange"],
+  ["LawnGreen", "Green"], ["MediumVioletRed", "Purple"], ["Google21", "Violet"]];  // bright on the clock (White shows dark blue)
+const RW_LINES = [[0, false], [24, true]];  // centre LED and turned over: the top line on 12 o'clock, the bottom upright on 6
+let RW_FONT = null;
+const rwTidy = s => String(s).split(/\s+/).filter(Boolean).join(" ").toUpperCase();
+const rwWords = m => [m.top, m.bottom].filter(Boolean).join(" / ");
+function rwLayout(top, bottom, topColor, bottomColor) {  // {grid, error, sideways}: grid[ring][led] = colour name, as ringwords.grid()
+  const grid = RINGS.map(() => Array(48).fill(null)), spans = [];
+  let sideways = false;
+  for (const [n, text, color] of [[0, top, topColor], [1, bottom, bottomColor]]) {
+    const [centre, flipped] = RW_LINES[n], chars = [...text], keys = [], bad = [];
+    for (let i = 0; i < chars.length;) {
+      const k = chars[i] === "<" && chars[i + 1] === "3" ? "<3" : chars[i];
+      (Object.hasOwn(RW_FONT, k) ? keys : bad).push(k);
+      i += k === "<3" ? 2 : 1;
+    }
+    if (bad.length) return { error: `Can't draw ${[...new Set(bad)].join(" ")}: use letters, digits, spaces, & ! ? - : * and <3` };
+    const cols = [];
+    keys.forEach((k, j) => {
+      if (j) cols.push([false, false, false, false]);
+      const rows = RW_FONT[k];
+      for (let c = 0; c < rows[0].length; c++) cols.push(rows.map(r => r[c] === "#"));
+    });
+    if (cols.length > 46) return { error: "Too long to fit round the dial" };
+    const half = Math.floor(cols.length / 2), at = cols.map((_, i) => ((flipped ? centre + half - i : centre - half + i) % 48 + 48) % 48);
+    spans.push(n ? new Set(at) : new Set(at.flatMap(p => [(p + 47) % 48, p, (p + 1) % 48])));  // the top with a dark LED either side
+    sideways ||= cols.length > 24;
+    cols.forEach((col, i) => col.forEach((lit, r) => { if (lit) grid[flipped ? 3 - r : r][at[i]] = color; }));
+  }
+  if ([...spans[0]].some(p => spans[1].has(p))) return { error: "The top and bottom lines run into each other: shorten one", grid };
+  return { grid, sideways };
+}
+function rwShowing(now) {  // the grid the clock shows now, or null
+  const m = S.message && S.message.showing;
+  if (!m || !RW_FONT || (m.until && m.until * 1000 <= now)) return null;
+  return rwLayout(m.top, m.bottom, m.top_color, m.bottom_color).grid || null;
+}
+const rwSet = ledSetter(ringCells($("rwLeds")));
+$("rwTopColor").innerHTML = $("rwBottomColor").innerHTML = RW_COLORS.map(([v, label]) => `<option value="${v}">${label}</option>`).join("");
+$("rwTopColor").value = "Aqua"; $("rwBottomColor").value = "Darkorange";
+function rwPreview() {
+  const top = rwTidy($("rwTop").value), bottom = rwTidy($("rwBottom").value), ghost = !top && !bottom;
+  const tc = $("rwTopColor").value, bc = $("rwBottomColor").value;
+  $("rwTopSw").style.setProperty("--c", led(tc)); $("rwBottomSw").style.setProperty("--c", led(bc));
+  $("rw").classList.toggle("ghost", ghost);
+  const r = RW_FONT ? rwLayout(ghost ? rwTidy($("rwTop").placeholder) : top, ghost ? rwTidy($("rwBottom").placeholder) : bottom, tc, bc)
+    : { error: "Can't lay out words: the bridge isn't answering" };
+  const grid = r.grid || RINGS.map(() => Array(48).fill(null));
+  grid.forEach((ring, k) => ring.forEach((c, i) => rwSet(k, i, c ? [led(c), 1] : null)));
+  const note = ghost ? "" : r.error || (r.sideways ? "Past about 6 letters a line, the words run down the sides and read sideways." : "");
+  $("rwNote").textContent = note; $("rwNote").classList.toggle("bad", !!r.error && !ghost);
+  $("rwShow").disabled = !!r.error && !ghost;
+}
+function renderMessage(m) {  // what GET /message says, or null when it can't be read
+  S.message = m; drawFace();
+  const s = m && m.showing;
+  $("rwLed").className = "cled " + (s ? "on" : m && m.on_clock ? "warn" : "");
+  $("rwState").textContent = !m ? "Unknown: the bridge isn't answering"
+    : s ? `Showing ${rwWords(s)} · ${s.until ? "until " + clockTime(s.until) : "until cleared"}`
+    : m.on_clock ? "Coming off the rings as soon as the bridge reaches the clock" : "Nothing on the rings";
+  $("rwClear").disabled = !(m && (s || m.on_clock));
+}
+async function loadMessage() {
+  const asked = CLOCK;
+  let m = null;
+  try { m = await api("/message"); } catch {}
+  if (CLOCK === asked) renderMessage(m);
+}
+["rwTop", "rwBottom"].forEach(id => { $(id).addEventListener("input", rwPreview); $(id).addEventListener("keydown", e => { if (e.key === "Enter") $("rwShow").click(); }); });
+["rwTopColor", "rwBottomColor"].forEach(id => $(id).addEventListener("change", rwPreview));
+$("rwShow").onclick = async () => {
+  const top = rwTidy($("rwTop").value), bottom = rwTidy($("rwBottom").value), asked = CLOCK, b = $("rwShow");
+  if (!top && !bottom) { toast("Type a top or bottom line", true); $("rwTop").focus(); return; }
+  if (b.disabled) return;
+  b.disabled = true; b.textContent = "Sending…";
+  try {
+    const m = await api("/message", { top, bottom, top_color: $("rwTopColor").value, bottom_color: $("rwBottomColor").value, minutes: +$("rwFor").value });
+    if (CLOCK === asked) renderMessage(m);
+    toast(`On the rings: ${rwWords(m.showing || { top, bottom })}`);
+  } catch (e) { toast("Not shown: " + e.message, true); }
+  finally { b.textContent = "Show now"; rwPreview(); }
+};
+$("rwClear").onclick = async () => {
+  const asked = CLOCK, b = $("rwClear");
+  b.disabled = true;
+  try {
+    const m = await api("/message", { clear: true });
+    if (CLOCK === asked) renderMessage(m);
+    toast(m.on_clock ? "Cleared; it comes off as soon as the bridge reaches the clock" : "Cleared");
+  } catch (e) { toast("Not cleared: " + e.message, true); loadMessage(); }
+};
+
 // ---- notes ----
 async function loadNotes() {
   const all = await api("/notes").catch(() => []);
@@ -1268,10 +1414,10 @@ $("saveNudges").onclick = async () => {
 // ---- start ----
 function dmHeading(h, dm, label) { h.dataset.dm = dm; h.innerHTML = dmSVG(dm) + `<span class="sr">${esc(label)}</span>`; }
 document.querySelectorAll("[data-dm]").forEach(h => dmHeading(h, h.dataset.dm, h.textContent));
-showBrightness(); drawQuiet(); preview(); showKind(); drawFace();
+showBrightness(); drawQuiet(); preview(); showKind(); rwPreview(); drawFace();
 renderScreens(null);
-loadOptions(); loadNotes(); loadStatus().then(() => { loadUnread(); loadSettings(); loadNudges(); loadScreens(); loadCalendars(); });
-setInterval(() => { loadStatus(); loadUnread(); loadNotes(); loadScreens(); loadCalendars(); api("/nudges").then(showSnooze).catch(() => {}); }, 10000);
+loadOptions(); loadNotes(); loadStatus().then(() => { loadUnread(); loadSettings(); loadNudges(); loadScreens(); loadCalendars(); loadMessage(); });
+setInterval(() => { loadStatus(); loadUnread(); loadNotes(); loadScreens(); loadCalendars(); loadMessage(); api("/nudges").then(showSnooze).catch(() => {}); }, 10000);
 let shownHour = new Date().getHours();
 setInterval(() => {
   drawFace(); renderFacts(); updateDues();

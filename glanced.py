@@ -34,6 +34,7 @@ import notes
 import nudges
 import pickups
 import pickupsync
+import ringwords
 import schedulering
 import screens
 import screensaver
@@ -716,11 +717,33 @@ def make_app(clocks, shop_url=None):
             return web.json_response({"error": f"couldn't save: {e.strerror or type(e).__name__}"}, status=500)
         return web.json_response(cals.json())
 
+    async def get_message(request):
+        return web.json_response(pick(request).message.json())
+
+    async def set_message(request):
+        """{"top", "bottom", "top_color", "bottom_color", "minutes"}: words on the rings now, taking the whole
+        face until the minutes are up (0: until cleared); or {"clear": true} to take them off."""
+        body = await read_body(request)
+        clock = pick(request, body)
+        try:
+            if body.get("clear") is True:
+                await clock.message.clear(clock)
+            else:
+                await clock.message.show(clock, **{k: body[k] for k in ("top", "bottom", "top_color", "bottom_color", "minutes")
+                                                   if k in body})
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        except ringwords.NotShown as e:
+            return web.json_response({"error": str(e)}, status=503)
+        except OSError as e:
+            return web.json_response({"error": f"couldn't save: {e.strerror or type(e).__name__}"}, status=500)
+        return web.json_response(clock.message.json())
+
     async def options(request):
         from glance import ICONS
         return web.json_response({"colors": list(pb.Color.keys()), "animations": list(pb.Animation.keys()),
                                   "sounds": list(pb.Sound.keys()), "priorities": list(PRIORITIES),
-                                  "icons": list(ICONS)})
+                                  "icons": list(ICONS), "ring_font": ringwords.FONT})
 
     async def panel(request):
         return web.FileResponse(PANEL)
@@ -729,7 +752,7 @@ def make_app(clocks, shop_url=None):
     app.add_routes([web.post("/notify", notify), web.get("/status", status),
                     web.get("/unread", list_unread), web.post("/unread/clear", clear_unread),
                     web.get("/settings", get_settings), web.post("/settings", set_settings),
-                    web.get("/options", options), web.post("/pickup", add_pickup), web.post("/stages", add_stages), web.post("/voice", voice), web.get("/nudges", get_nudges), web.get("/notes", list_notes), web.post("/notes", change_note), web.post("/nudges", set_nudges), web.get("/screens", get_screens), web.post("/screens", set_screens), web.get("/calendars", get_calendars), web.post("/calendars", set_calendars), web.get("/", panel)])
+                    web.get("/options", options), web.post("/pickup", add_pickup), web.post("/stages", add_stages), web.post("/voice", voice), web.get("/nudges", get_nudges), web.get("/notes", list_notes), web.post("/notes", change_note), web.post("/nudges", set_nudges), web.get("/screens", get_screens), web.post("/screens", set_screens), web.get("/calendars", get_calendars), web.post("/calendars", set_calendars), web.get("/message", get_message), web.post("/message", set_message), web.get("/", panel)])
     return app
 
 
@@ -754,11 +777,12 @@ async def main():
         clock.nudges = nudges.Settings(name, c.get("nudges"))
         clock.screens = screens.Screens(name, c)
         clock.calendars = calendars.Calendars(name, c)
+        clock.message = ringwords.Message(name)
         watchers = {"connection": clock.keep_connected, "replay": lambda clock=clock: unread.replay(clock),
                     "pickups": lambda clock=clock: pickups.watch(clock), "nudges": lambda clock=clock: nudges.watch(clock),
                     "ring": lambda clock=clock: statusring.watch(clock), "schedule": lambda clock=clock: schedulering.watch(clock),
                     "animation": lambda clock=clock: animscreen.watch(clock),
-                    "screensaver": lambda clock=clock: screensaver.watch(clock)}
+                    "screensaver": lambda clock=clock: screensaver.watch(clock), "words": lambda clock=clock: ringwords.watch(clock)}
         if "mail" in c:
             watchers["mail"] = lambda clock=clock, c=c: mailwatch.watch(clock, c["mail"])
         if "texts" in c:
