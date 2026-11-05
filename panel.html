@@ -723,7 +723,7 @@ function wedge(ring, from, span, color) {  // light `span` units clockwise from 
   const a = from * .8, b = a + Math.min(60, span) * .8;
   for (let i = Math.floor(a); i < Math.ceil(b); i++) {
     const cover = Math.min(i + 1, b) - Math.max(i, a);
-    ring[i % 48] = [color, cover >= 1 ? 1 : .2 + .8 * cover];
+    if (cover > 0) ring[i % 48] = [color, cover >= 1 ? 1 : .2 + .8 * cover];
   }
 }
 
@@ -733,7 +733,7 @@ function drawFace(now = Date.now()) {
   const cd = link ? countdown(now) : null, d = new Date(now);
   if (cd) {  // the clock's own timer face (photo, 2026-11-05): the time left as wedges from the hands to the end time
     const sec = d.getSeconds() + d.getMilliseconds() / 1000, min = d.getMinutes() + sec / 60;
-    wedge(L[1], min, cd.left / 60, TIMER_MIN_COLOR);  // minutes left, from the minute hand, 60 minutes a turn
+    wedge(L[1], min, Math.floor(cd.left / 60), TIMER_MIN_COLOR);  // whole minutes left, from the minute hand, 60 minutes a turn
     wedge(L[0], sec, cd.left % 60, TIMER_COLOR);  // the seconds over whole minutes, from the current second, 60 a turn
   } else if (link && !(S.screens && S.screens.status && !S.screens.status.on)) {  // as statusring.picture() draws it
     S.unread.slice(0, ITEM_MAX).forEach((it, k) => {
