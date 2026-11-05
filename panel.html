@@ -66,6 +66,23 @@
   .hands-sh line { stroke: rgba(0,0,0,.45); stroke-linecap: round; }
   .hub { fill: #c4c7ca; stroke: #8a8d91; stroke-width: 1; }
   #faceLeds { transition: opacity .4s; }
+
+  /* hey glance: a typed command, handled like a spoken one */
+  .say { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px 28px; padding: 24px 0 26px; border-bottom: 1px solid var(--line); }
+  .say h2 { margin: 0; line-height: 0; }
+  .sayrow { display: flex; gap: 8px; margin: 0; }
+  .sayrow input { flex: 1; min-width: 0; }
+  .saylog, .say .hint { grid-column: 2; margin: 0; }
+  .saylog { list-style: none; padding: 0; }
+  .saylog:empty { display: none; }
+  .saylog:not(:empty) ~ .hint { display: none; }  /* the examples, until something's been said */
+  .saylog li { padding: 6px 0; }
+  .saylog li + li .reply { color: var(--ink-2); font-weight: 400; }
+  .saylog .you { font: 13px var(--mono); color: var(--ink-2); overflow-wrap: anywhere; }
+  .saylog .reply { display: flex; align-items: baseline; gap: 10px; font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
+  .saylog .reply .cled { position: relative; top: -1px; }
+  .saylog .reply .cled.wait { animation: pulse 1.2s ease-in-out infinite; }
+  .saylog .via { font: 11.5px var(--mono); color: var(--ink-3); text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
   .readout { min-width: 0; }
   .cname { margin: 0; font-size: 46px; line-height: 1.05; font-weight: 600; letter-spacing: -.025em; text-transform: capitalize; overflow-wrap: anywhere; }
   .caddr { margin: 8px 0 22px; font: 12.5px var(--mono); color: var(--ink-2); letter-spacing: .03em; }
@@ -163,13 +180,13 @@
                 border-radius: 50%; border: 1.5px solid var(--ctl); background: transparent; cursor: pointer; }
   input.check:checked { background: var(--ink); border-color: var(--ink); }
   input.check:checked::after { content: ""; width: 6px; height: 11px; border: solid var(--page); border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg); }
-  .days { display: flex; gap: 5px; margin-top: 2px; max-width: 420px; }
-  .day { position: relative; flex: 1; }
-  .day input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
-  .day span { display: flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 2px;
-              border: 1px solid var(--line-2); border-radius: 999px; font: 500 13px var(--mono); color: var(--ink-2); }
-  .day input:checked + span { background: var(--ink); border-color: var(--ink); color: var(--page); }
-  .day input:focus-visible + span { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .opts { display: flex; gap: 5px; margin-top: 2px; max-width: 420px; }
+  .opt { position: relative; flex: 1; }
+  .opt input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+  .opt span { display: flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 2px;
+              border: 1px solid var(--line-2); border-radius: 999px; font: 500 13px var(--mono); color: var(--ink-2); white-space: nowrap; }
+  .opt input:checked + span { background: var(--ink); border-color: var(--ink); color: var(--page); }
+  .opt input:focus-visible + span { outline: 2px solid var(--ink); outline-offset: 2px; }
   .snooze { display: flex; align-items: center; gap: 10px; min-height: 28px; font-weight: 500; }
   .snooze .cled.on { background: var(--on); } .snooze .cled.warn { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
 
@@ -196,8 +213,11 @@
   .ptrack { stroke: rgba(255,255,255,.07); }
   .pring.pulse { animation: pulse 1.8s ease-in-out infinite; }
   .pring.chase { stroke-dasharray: 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 37; animation: chase 2.4s steps(48) infinite; }
+  .pring.flash { animation: flash .375s linear 8; }  /* the light flash: 3 s of red with a white strobe, under 3 flashes a second */
   @keyframes pulse { 50% { opacity: .18; } }
   @keyframes chase { to { stroke-dashoffset: -48; } }
+  @keyframes flash { 0%, 49.9% { stroke: #ff3b30; } 50%, 100% { stroke: #fff; } }
+  .togs { display: flex; flex-wrap: wrap; gap: 0 22px; }
   .icons { display: flex; gap: 6px; margin-top: 10px; overflow-x: auto; scrollbar-width: none; padding-right: 32px;
            -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 40px), transparent); }
   .icons::-webkit-scrollbar { display: none; }
@@ -220,6 +240,8 @@
     .wrap { padding: 6px 16px 56px; }
     .top { min-height: 56px; }
     .hero { grid-template-columns: clamp(124px, 41vw, 230px) minmax(0, 1fr); gap: 18px; padding: 10px 0 22px; }
+    .say { grid-template-columns: minmax(0, 1fr); padding: 20px 0 22px; }
+    .saylog, .say .hint { grid-column: 1; }
     .cname { font-size: 26px; }
     .caddr { margin: 3px 0 8px; font-size: 11px; letter-spacing: 0; }
     .facts li { min-height: 0; padding: 3px 0; gap: 9px; font-size: 14px; line-height: 1.3; border: 0 !important; }
@@ -230,6 +252,7 @@
     .col:nth-child(2) > .panel:first-child { border-top: 1px solid var(--line); }
     .icons { margin-right: -16px; }
     .actions .btn.primary { flex: 1 1 auto; }
+    .actions .grow { display: none; }
     .btn.sm { padding: 0 12px; }
   }
   @media (max-width: 340px) {
@@ -237,7 +260,7 @@
     .face { width: 70%; margin: 0 auto; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .pring.pulse, .pring.chase, .sweep.run { animation: none; }
+    .pring.pulse, .pring.chase, .pring.flash, .sweep.run, .saylog .reply .cled.wait { animation: none; }
     *, *::before { transition: none !important; }
   }
 </style>
@@ -293,6 +316,18 @@
     </div>
   </section>
 
+  <section class="say" aria-labelledby="hSay">
+    <h2 class="dm" id="hSay" data-dm="HEY GLANCE">Hey glance</h2>
+    <form class="sayrow" id="sayForm">
+      <input type="text" id="sayText" maxlength="200" placeholder="Sam's coming for the Juno at 3" autocomplete="off" enterkeyhint="send" aria-label="Tell the clock">
+      <button class="btn primary" id="sayGo">Say</button>
+    </form>
+    <ul class="saylog" id="sayLog"></ul>
+    <p class="sr" id="sayLive" role="status"></p>
+    <p class="hint">Type what you'd say: "timer 20 minutes", "five more minutes", "push Sam back to 4", "cancel the bake timer".
+      Common phrasings work at once; looser ones go to Claude Haiku.</p>
+  </section>
+
   <div class="board">
     <div class="col">
       <section class="panel" id="secUnread" aria-labelledby="hUnread">
@@ -319,8 +354,13 @@
 
       <section class="panel" id="secPickup" aria-labelledby="hPickup">
         <div class="sh"><h2 class="dm" id="hPickup" data-dm="PICKUP">Pickup</h2></div>
+        <div class="opts" id="pKind" role="radiogroup" aria-label="Kind" style="margin:0 0 14px">
+          <label class="opt"><input type="radio" name="pKind" value="pickup" autocomplete="off" checked><span>Pickup</span></label>
+          <label class="opt"><input type="radio" name="pKind" value="timer" autocomplete="off"><span>Timer</span></label>
+          <label class="opt"><input type="radio" name="pKind" value="stop" autocomplete="off"><span>Hard stop</span></label>
+        </div>
         <div class="fields pick">
-          <label class="field">Who / what <input type="text" id="pName" maxlength="24" placeholder="Sam - Juno" autocomplete="off"></label>
+          <label class="field"><span id="pNameText">Who / what</span> <input type="text" id="pName" maxlength="24" placeholder="Sam - Juno" autocomplete="off"></label>
           <label class="field">When <input type="text" id="pWhen" placeholder="40m, 1h30, 2:30pm" autocomplete="off"></label>
         </div>
         <div class="actions">
@@ -328,7 +368,7 @@
           <span class="grow"></span>
           <button class="btn primary" id="addPickup">Add pickup</button>
         </div>
-        <p class="hint">Alerts now, 10 minutes before, and when due. Clear it from Unread when they've been.</p>
+        <p class="hint" id="pHint">Alerts now, 10 minutes before, and when due. Clear it from Unread when they've been.</p>
       </section>
 
       <section class="panel" id="secStages" aria-labelledby="hStages">
@@ -373,7 +413,7 @@
           <label class="field">Closing at <input type="time" id="nClosing"></label>
         </div>
         <div class="field" style="margin-top:14px">On these days (none checked: every day)
-          <div class="days" id="nDays" role="group" aria-label="Closing days"></div>
+          <div class="opts" id="nDays" role="group" aria-label="Closing days"></div>
         </div>
         <p class="hint">"Wrap up" 30 minutes before closing, "Closing time" at it. Timers, pickups and hard stops you set aren't affected by any of this.</p>
         <div class="actions end"><button class="btn primary" id="saveNudges">Save nudges</button></div>
@@ -402,11 +442,23 @@
           <label class="field">Sound <span class="sel"><select id="sound"></select></span></label>
           <label class="field">Priority <span class="sel"><select id="priority"></select></span></label>
         </div>
+        <div class="field" style="margin-top:14px">Text mode
+          <div class="opts" id="mode" role="radiogroup" aria-label="Text mode">
+            <label class="opt"><input type="radio" name="mode" value="Repeat" autocomplete="off" checked><span>Twice</span></label>
+            <label class="opt"><input type="radio" name="mode" value="None" autocomplete="off"><span>Once</span></label>
+            <label class="opt"><input type="radio" name="mode" value="Rapid" autocomplete="off"><span>Rapid</span></label>
+            <label class="opt"><input type="radio" name="mode" value="Delay" autocomplete="off"><span>Delay</span></label>
+          </div>
+        </div>
         <div class="actions">
-          <label class="tog"><input type="checkbox" class="switch" id="keep"> Keep in unread</label>
+          <div class="togs">
+            <label class="tog"><input type="checkbox" class="switch" id="keep"> Keep in unread</label>
+            <label class="tog"><input type="checkbox" class="switch" id="flash" autocomplete="off"> Light flash first</label>
+          </div>
           <span class="grow"></span>
           <button class="btn primary" id="send">Send</button>
         </div>
+        <p class="hint">The light flash runs all four rings red and white for 3 seconds before the text, as for anything due now. Text mode only applies to text that fits in one piece (about 30 characters); longer text shows each piece once.</p>
       </section>
     </div>
 
@@ -869,26 +921,83 @@ $("icons").addEventListener("click", e => {
   preview();
 });
 
+$("flash").addEventListener("change", () => {  // play the flash once on the preview
+  looks();  // stops one already playing
+  if (!$("flash").checked || calm.matches) return;
+  $("prevRing").getBoundingClientRect();  // so the flash starts over
+  $("prevRing").setAttribute("class", "pring flash");
+});
+$("prevRing").addEventListener("animationend", e => { if (e.animationName === "flash") looks(); });
+
 $("send").onclick = async () => {
   const text = $("text").value.trim(); if (!text) return toast("Type some text first", true);
+  $("send").disabled = true; $("send").textContent = "Sending…";  // the flash holds the reply about 3.5 s
   try {
-    await api("/notify", { text, color: $("color").value, anim: $("anim").value, sound: $("sound").value,
-      priority: $("priority").value, keep: $("keep").checked, source: "panel" });
+    await api("/notify", { text, color: $("color").value, anim: $("anim").value, sound: $("sound").value, mode: document.querySelector("[name=mode]:checked").value,
+      priority: $("priority").value, keep: $("keep").checked, flash: $("flash").checked, source: "panel" });
     toast("Sent"); loadUnread();
   } catch (e) { toast("Not sent: " + e.message, true); }
+  finally { $("send").disabled = false; $("send").textContent = "Send"; }
 };
 
-// ---- pickup ----
+// ---- hey glance: what you'd say, typed (POST /voice; the bridge's patterns first, then Claude Haiku) ----
+const VIA = { pattern: "instant", haiku: "Haiku" };
+const said = [];  // the last few commands and replies, newest first
+function showSaid() {
+  $("sayLog").innerHTML = said.map(s => `<li><div class="you">› ${esc(s.text)}</div>
+    <div class="reply"><span class="cled ${s.reply === null ? "wait" : s.bad ? "off" : "on"}"></span><span>${s.reply === null ? "…" : esc(s.reply)}</span>${VIA[s.via] ? `<span class="via">${VIA[s.via]}</span>` : ""}</div></li>`).join("");
+}
+$("sayForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const text = $("sayText").value.trim();
+  if (!text || $("sayGo").disabled) return;
+  const entry = { text, reply: null };
+  said.unshift(entry); said.length = Math.min(said.length, 3);
+  $("sayText").value = ""; $("sayGo").disabled = true; showSaid();
+  try {  // /voice takes its clock from the query (or the words), not the body
+    const r = await api("/voice" + (CLOCK ? "?clock=" + encodeURIComponent(CLOCK) : ""), { text });
+    entry.reply = String(r.reply || "Done."); entry.via = r.via;
+    // /voice answers 200 either way, so a failure is told by its wording (as in glanced.py's voice, change and cancel)
+    entry.bad = r.via === "none" || /^Sorry|isn't answering|nothing like that|What should I change|can only be|no shop app|said no|doesn't have|couldn't|don't understand/.test(entry.reply);
+  } catch (err) {
+    entry.reply = "Not sent: " + err.message; entry.bad = true;
+    if (!$("sayText").value) $("sayText").value = text;
+  }
+  $("sayGo").disabled = false; showSaid();
+  $("sayLive").textContent = entry.reply;
+  loadStatus(); loadUnread(); loadNotes();
+});
+
+// ---- pickup, timer or hard stop ----
+const PICK = {
+  pickup: { head: "PICKUP", name: "Who / what", ph: "Sam - Juno", btn: "Add pickup",
+            hint: "Alerts now, 10 minutes before, and when due. Clear it from Unread when they've been." },
+  timer: { head: "TIMER", name: "Label (optional)", ph: "Bake", btn: "Start timer",
+           hint: "Counts down on the ring from now. Alerts now, at 10 minutes left, and when it's up." },
+  stop: { head: "HARD STOP", name: "What for (optional)", ph: "Close up", btn: "Set hard stop",
+          hint: "Warns at 30, 15 and 5 minutes, with the ring counting down the last 30, then says STOP NOW every 5 minutes for half an hour unless you clear it." },
+};
+const pickKind = () => document.querySelector("[name=pKind]:checked").value;
+function showKind() {
+  const kind = pickKind(), p = PICK[kind];
+  dmHeading($("hPickup"), p.head, KIND[kind]);
+  $("pNameText").textContent = p.name; $("pName").placeholder = p.ph;
+  $("addPickup").textContent = p.btn; $("pHint").textContent = p.hint;
+}
+$("pKind").addEventListener("change", showKind);
 function markWhen() { document.querySelectorAll("[data-when]").forEach(b => b.classList.toggle("on", b.dataset.when === $("pWhen").value.trim())); }
 document.querySelectorAll("[data-when]").forEach(b => b.onclick = () => { $("pWhen").value = b.dataset.when; markWhen(); });
 $("pWhen").addEventListener("input", markWhen);
 $("addPickup").onclick = async () => {
-  const name = $("pName").value.trim(), when = $("pWhen").value.trim();
-  if (!name || !when) return toast("Fill in who and when", true);
+  const kind = pickKind(), name = $("pName").value.trim(), when = $("pWhen").value.trim();
+  if (kind === "pickup" && !name) return toast("Fill in who and when", true);
+  if (!when) return toast("Fill in when", true);
+  $("addPickup").disabled = true;  // one tap, one pickup
   try {
-    const item = await api("/pickup", { name, when });
-    toast(item.text.replace(/^PICKUP /, "Pickup: ")); $("pName").value = ""; $("pWhen").value = ""; markWhen(); loadUnread();
+    const item = await api("/pickup", { kind, name, when });
+    toast(item.text.replace(/^(PICKUP|TIMER|STOP) /, KIND[kind] + ": ")); $("pName").value = ""; $("pWhen").value = ""; markWhen(); loadUnread();
   } catch (e) { toast("Not added: " + e.message, true); }
+  finally { $("addPickup").disabled = false; }
 };
 
 // ---- staged timer ----
@@ -984,7 +1093,7 @@ $("noteText").addEventListener("keydown", e => { if (e.key === "Enter") $("addNo
 
 // ---- focus nudges ----
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-$("nDays").innerHTML = DAYS.map(d => `<label class="day"><input type="checkbox" value="${d}"><span>${d}</span></label>`).join("");
+$("nDays").innerHTML = DAYS.map(d => `<label class="opt"><input type="checkbox" value="${d}"><span>${d}</span></label>`).join("");
 let lastClosing = "18:00";
 
 function showNudges(n) {
@@ -1025,8 +1134,9 @@ $("saveNudges").onclick = async () => {
 };
 
 // ---- start ----
-document.querySelectorAll("[data-dm]").forEach(h => h.innerHTML = dmSVG(h.dataset.dm) + `<span class="sr">${esc(h.textContent)}</span>`);
-showBrightness(); drawQuiet(); preview(); drawFace();
+function dmHeading(h, dm, label) { h.dataset.dm = dm; h.innerHTML = dmSVG(dm) + `<span class="sr">${esc(label)}</span>`; }
+document.querySelectorAll("[data-dm]").forEach(h => dmHeading(h, h.dataset.dm, h.textContent));
+showBrightness(); drawQuiet(); preview(); showKind(); drawFace();
 loadOptions(); loadNotes(); loadStatus().then(() => { loadUnread(); loadSettings(); loadNudges(); });
 setInterval(() => { loadStatus(); loadUnread(); loadNotes(); api("/nudges").then(showSnooze).catch(() => {}); }, 10000);
 let shownHour = new Date().getHours();
