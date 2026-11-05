@@ -664,7 +664,7 @@ const RING_OUT = 170, RING_DEPTH = 18.1, RINGS = [0, 1, 2, 3];
 const DAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const KIND = { pickup: "Pickup", timer: "Timer", stop: "Hard stop", stages: "Staged timer" };
 const RING_FROM = { pickup: 10, timer: null, stop: 30, stages: null };  // minutes before due the ring starts, as in pickups.py
-const TIMER_COLOR = "#3ccf4e";  // the clock's Timer has no colour field; its firmware draws the countdown green
+const TIMER_COLOR = "#3ccf4e", TIMER_MIN_COLOR = "#ffc23d";  // the Timer has no colour field: the clock draws seconds green, minutes yellow
 const ITEM_PX = 3, ITEM_GAP = 1, ITEM_MAX = 12;  // statusring.py: one 3-LED segment per unread item from 12 o'clock, the oldest 12
 const ARC_STEPS = 12, FOCUS_WARN = 0.8;  // statusring.py: the active stretch on the inner ring, green then orange
 const faceLeds = RINGS.map(() => []), faceKey = RINGS.map(() => Array(48).fill("")), hourDots = [];
@@ -719,11 +719,23 @@ function countdown(now) {  // the countdown on the clock's ring (see refresh_rin
 }
 const itemLabel = it => KIND[it.kind] ? [KIND[it.kind], it.name].filter(Boolean).join(" · ") : it.ring_text || it.name || "Countdown";
 
+function wedge(ring, from, span, color) {  // light `span` units clockwise from `from` on a 60-unit dial; part-lit LEDs dimmer
+  const a = from * .8, b = a + Math.min(60, span) * .8;
+  for (let i = Math.floor(a); i < Math.ceil(b); i++) {
+    const cover = Math.min(i + 1, b) - Math.max(i, a);
+    ring[i % 48] = [color, cover >= 1 ? 1 : .2 + .8 * cover];
+  }
+}
+
 function drawFace(now = Date.now()) {
   const link = !!(S.bridge && S.status && S.status.connected);
   const L = RINGS.map(() => Array(48).fill(null));
-  const cd = link ? countdown(now) : null;
-  if (link && !(S.screens && S.screens.status && !S.screens.status.on)) {  // as statusring.picture() draws it
+  const cd = link ? countdown(now) : null, d = new Date(now);
+  if (cd) {  // the clock's own timer face (photo, 2026-11-05): the time left as wedges from the hands to the end time
+    const sec = d.getSeconds() + d.getMilliseconds() / 1000, min = d.getMinutes() + sec / 60;
+    wedge(L[1], min, cd.left / 60, TIMER_MIN_COLOR);  // minutes left, from the minute hand, 60 minutes a turn
+    wedge(L[0], sec, cd.left % 60, TIMER_COLOR);  // the seconds over whole minutes, from the current second, 60 a turn
+  } else if (link && !(S.screens && S.screens.status && !S.screens.status.on)) {  // as statusring.picture() draws it
     S.unread.slice(0, ITEM_MAX).forEach((it, k) => {
       const c = led(it.color || "Lime");
       if (c) for (let j = 0; j < ITEM_PX; j++) L[0][k * (ITEM_PX + ITEM_GAP) + j] = [c, 1];
@@ -735,16 +747,11 @@ function drawFace(now = Date.now()) {
       for (let i = 0; i < Math.max(1, Math.floor(share * ARC_STEPS)) * 48 / ARC_STEPS; i++) L[3][i] = [c, 1];
     }
   }
-  if (link) {
-    if (cd) {
-      const lit = cd.frac * 48;
-      for (let i = 0; i < Math.ceil(lit); i++) L[1][i] = L[2][i] = L[3][i] = [cd.color, i < Math.floor(lit) ? 1 : .2 + .8 * (lit % 1)];
-    }
-  }
   L.forEach((ring, k) => ring.forEach((v, i) => setLed(k, i, v)));
-  const s = S.settings, d = new Date(now);
+  const s = S.settings;
   hourDots.forEach(e => e.style.display = s && s.night_mode ? "none" : "");  // night mode hides them, as on the clock
-  faceMatrix(textCols(`${DAY[d.getDay()]} ${d.getDate()}`));
+  const left = cd && Math.ceil(cd.left);
+  faceMatrix(textCols(cd ? `${String(Math.floor(left / 60)).padStart(2, "0")}:${String(left % 60).padStart(2, "0")}` : `${DAY[d.getDay()]} ${d.getDate()}`));
   const m = d.getMinutes() + d.getSeconds() / 60, ha = `rotate(${((d.getHours() % 12 + m / 60) * 30).toFixed(2)})`, ma = `rotate(${(m * 6).toFixed(2)})`;
   ["hh", "hhS"].forEach(id => $(id).setAttribute("transform", ha));
   ["mh", "mhS"].forEach(id => $(id).setAttribute("transform", ma));
