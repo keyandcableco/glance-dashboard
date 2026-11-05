@@ -26,7 +26,7 @@ of his `Glance.proto`, fixed so `protoc` accepts it. Everything here builds on t
   four rings flash red and white for 3 seconds before the text. `/notify` takes `"flash": true` too.
 - **Schedule ring**: the next 11 hours of calendar events (aqua), pickups (gold) and hard stops (red) as
   blocks around the dial at their times, drawn by the clock's own appointments display. It stops at
-  midnight. Set `schedule_ring = false` in a clock's section to turn it off.
+  midnight.
 - **Staged timers** on the clock's own multi-interval timer: each stage counts down on the ring with its
   label on the text line. Cap reforming ("50V 15 → 75V 15 → 100V 15 → 120V 15"), glue-ups, burn-in,
   lacquer coats, or focus rhythms ("hey glance, focus" = WORK 25 / BREAK 5, four rounds ending on WORK).
@@ -40,7 +40,10 @@ of his `Glance.proto`, fixed so `protoc` accepts it. Everything here builds on t
 - **Status ring**, always on under the clock's time and date: one colored segment per unread item on the
   outer ring (the oldest 12), and, while break reminders are on, your current active stretch growing
   toward the break nudge on the inner ring. It steps aside for alerts and countdowns.
-  Set `status_ring = false` in a clock's section to turn it off (the next start removes it from the clock).
+- **Screens**: the clock shows its time and date, the status ring, the forecast and the schedule ring in
+  turn, a few seconds each. Switch each of the last three on or off per clock on the panel (it's kept in
+  `screens-<name>.json`); `status_ring = false` or `schedule_ring = false` in a clock's section only sets
+  where it starts.
 - **Hyperfocus nudges**: a break reminder after a long stretch of keyboard/mouse activity, wrap-up and
   closing-time nudges. Snooze from the panel.
 - **Voice**: `clockvoice.py` takes a transcribed sentence ("Sam's swinging by for the Juno after lunch").
@@ -141,6 +144,7 @@ All on `http://127.0.0.1:8740`; every call takes an optional `clock` (name), def
 | `GET/POST /notes` | `text` to add; `id` with `done` or `delete` | |
 | `GET/POST /settings` | `brightness, night_mode, dnd, dnd_from, dnd_till` | The clock's own settings |
 | `GET/POST /nudges` | `breaks, break_minutes, pause_minutes, closing, closing_days, snooze_minutes` | |
+| `GET/POST /screens` | `status, forecast, schedule` (each `true` or `false`) | Which screens the clock shows in turn; applied within half a minute |
 | `GET /status`, `GET /options` | | Connection, unread counts; the names of colors, sounds, icons |
 
 `glance.py --list` prints the colors, animations, sounds and icons (`{bell}`, `{heart}`, …). `/notify` refuses
@@ -179,7 +183,7 @@ an unknown `{name}`; everywhere else (email subjects, calendar titles, names) it
 
 `glanced.py` the bridge · `glance.py` protocol helpers + one-shot CLI · `config.py` · `mailwatch.py`,
 `textwatch.py`, `calwatch.py` sources · `pickups.py` timers/pickups/stops · `unread.py` · `nudges.py` ·
-`notes.py` · `statusring.py` (and the light flash) · `schedulering.py` · `forecast.py` · `shopapp.py` optional shop app · `brain.py` Haiku · `clockvoice.py` voice front end · `panel.html` · `pickup` CLI ·
+`notes.py` · `statusring.py` (and the light flash) · `schedulering.py` · `forecast.py` · `screens.py` · `shopapp.py` optional shop app · `brain.py` Haiku · `clockvoice.py` voice front end · `panel.html` · `pickup` CLI ·
 `set_setting.py` · `contrib/`
 
 ## License

@@ -8,7 +8,8 @@ Configured per clock in config.toml [clocks.<name>.forecast]:
     source = "nws"        # nws: US National Weather Service (free, any use, US only)
                           # open-meteo: worldwide, free for non-commercial use only
 It's a saved scene (SLOT), refreshed every REFRESH_S, and like the status ring it waits while an
-alert or countdown is showing.
+alert or countdown is showing. Switched off (screens.py), or with no [forecast] section, it's deleted
+(again after every reconnect) and nothing is fetched.
 """
 import asyncio
 import calendar
@@ -87,11 +88,23 @@ async def watch(clock, cfg):
     source = cfg.get("source", "nws")
     fetch = open_meteo_hours if source == "open-meteo" else nws_hours
     field = SHOWS[show][1] if source == "open-meteo" else SHOWS[show][0]
-    sent_at = 0.0
+    sent_at, removed, client = 0.0, False, None
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as http:
         while True:
             await asyncio.sleep(30)
             now = time.time()
+            if not clock.screens.on("forecast"):
+                sent_at = 0.0  # drawn again soon after it's switched back on
+                if clock.client is not client:  # a new link: the clock may still hold one
+                    client, removed = clock.client, False
+                if not removed and clock.connected and not statusring.busy(clock, now):
+                    try:
+                        await clock.write(bytes([statusring.SCENES_DELETE, 0, 0, SLOT]))
+                        removed = True
+                    except Exception as e:
+                        log.warning("%s: removing the forecast failed: %s", clock.name, e)
+                continue
+            removed = False
             if now - sent_at < REFRESH_S or not clock.connected or statusring.busy(clock, now):
                 continue
             try:

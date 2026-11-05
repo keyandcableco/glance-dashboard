@@ -32,6 +32,7 @@ import notes
 import nudges
 import pickups
 import schedulering
+import screens
 import textwatch
 import unread
 from glance import CHAR, NOTIFY, PRIORITIES, build_notice
@@ -633,6 +634,23 @@ def make_app(clocks, shop_url=None):
         log.info("%s: nudges: %s", clock.name, changes)
         return web.json_response(values)
 
+    async def get_screens(request):
+        return web.json_response(pick(request).screens.json())
+
+    async def set_screens(request):
+        """{"status", "forecast", "schedule": true or false}; each screen's watcher puts it on or takes
+        it off the clock within half a minute (later if an alert or countdown is showing)."""
+        body = await read_body(request)
+        clock = pick(request, body)
+        try:
+            changes = clock.screens.update({k: v for k, v in body.items() if k != "clock"})
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        except OSError as e:
+            return web.json_response({"error": f"couldn't save: {e}"}, status=500)
+        log.info("%s: screens: %s", clock.name, changes)
+        return web.json_response(clock.screens.json())
+
     async def options(request):
         from glance import ICONS
         return web.json_response({"colors": list(pb.Color.keys()), "animations": list(pb.Animation.keys()),
@@ -646,7 +664,7 @@ def make_app(clocks, shop_url=None):
     app.add_routes([web.post("/notify", notify), web.get("/status", status),
                     web.get("/unread", list_unread), web.post("/unread/clear", clear_unread),
                     web.get("/settings", get_settings), web.post("/settings", set_settings),
-                    web.get("/options", options), web.post("/pickup", add_pickup), web.post("/stages", add_stages), web.post("/voice", voice), web.get("/nudges", get_nudges), web.get("/notes", list_notes), web.post("/notes", change_note), web.post("/nudges", set_nudges), web.get("/", panel)])
+                    web.get("/options", options), web.post("/pickup", add_pickup), web.post("/stages", add_stages), web.post("/voice", voice), web.get("/nudges", get_nudges), web.get("/notes", list_notes), web.post("/notes", change_note), web.post("/nudges", set_nudges), web.get("/screens", get_screens), web.post("/screens", set_screens), web.get("/", panel)])
     return app
 
 
@@ -669,20 +687,18 @@ async def main():
     for name, c in cfg["clocks"].items():
         clock = clocks[name] = Clock(name, c["address"])
         clock.nudges = nudges.Settings(name, c.get("nudges"))
+        clock.screens = screens.Screens(name, c)
         watchers = {"connection": clock.keep_connected, "replay": lambda clock=clock: unread.replay(clock),
-                    "pickups": lambda clock=clock: pickups.watch(clock), "nudges": lambda clock=clock: nudges.watch(clock)}
-        ring = statusring.watch if c.get("status_ring", True) else statusring.clear
-        watchers["ring"] = lambda clock=clock, ring=ring: ring(clock)
-        schedule = schedulering.watch if c.get("schedule_ring", True) else schedulering.clear
-        watchers["schedule"] = lambda clock=clock, schedule=schedule: schedule(clock)
+                    "pickups": lambda clock=clock: pickups.watch(clock), "nudges": lambda clock=clock: nudges.watch(clock),
+                    "ring": lambda clock=clock: statusring.watch(clock), "schedule": lambda clock=clock: schedulering.watch(clock)}
         if "mail" in c:
             watchers["mail"] = lambda clock=clock, c=c: mailwatch.watch(clock, c["mail"])
         if "texts" in c:
             watchers["texts"] = lambda clock=clock, c=c: textwatch.watch(clock, c["texts"])
         if "calendar" in c:
             watchers["calendar"] = lambda clock=clock, c=c: calwatch.watch(clock, c["calendar"])
-        if "forecast" in c:
-            watchers["forecast"] = lambda clock=clock, c=c: forecast.watch(clock, c["forecast"])
+        # without a [forecast] section it only makes sure no forecast is left on the clock
+        watchers["forecast"] = lambda clock=clock, c=c: forecast.watch(clock, c.get("forecast") or {})
         if not tasks and cfg.get("shop_app", {}).get("url"):  # follow-up nags go to the first clock
             watchers["followups"] = lambda clock=clock: shopapp.watch_followups(clock, cfg["shop_app"])
         tasks += [asyncio.create_task(supervised(f"{name} {label}", start)) for label, start in watchers.items()]

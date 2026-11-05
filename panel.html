@@ -120,6 +120,10 @@
   li.item:first-child { border-top: 0; }
   .itext { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   .itext .t { font-weight: 500; }
+  .scr { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 0; cursor: pointer; }
+  .scr .t, .scr .d { display: block; }
+  .itext .d { font-size: 13px; color: var(--ink-2); margin-top: 2px; }
+  li.item.off .chipled { opacity: .45; }
   .meta { font: 12.5px/1.45 var(--mono); color: var(--ink-2); margin-top: 2px; }
   .meta .src { text-transform: uppercase; letter-spacing: .04em; }
   .meta .late { color: var(--bad); }
@@ -484,6 +488,12 @@
         <p class="hint">During quiet hours only critical alerts show. Unread replays are silent and always show.</p>
         <div class="actions end"><button class="btn primary" id="saveSettings">Save settings</button></div>
       </section>
+
+      <section class="panel" id="secScreens" aria-labelledby="hScreens">
+        <div class="sh"><h2 class="dm" id="hScreens" data-dm="SCREENS">Screens</h2></div>
+        <ul class="list" id="screens"></ul>
+        <p class="hint">The clock shows these in turn, a few seconds each; how long is up to the clock. A switch takes effect within half a minute, or once an alert or countdown that's showing is over.</p>
+      </section>
     </div>
   </div>
 </div>
@@ -809,7 +819,7 @@ $("clocks").addEventListener("click", e => {
   CLOCK = b.dataset.clock;
   try { localStorage.setItem("clock", CLOCK); } catch {}
   $("clocks").querySelectorAll("[data-clock]").forEach(x => x.setAttribute("aria-pressed", x === b));
-  loadStatus(); loadUnread(); loadSettings(); loadNudges();
+  loadStatus(); loadUnread(); loadSettings(); loadNudges(); loadScreens();
 });
 
 async function loadStatus() {
@@ -1057,6 +1067,44 @@ $("saveSettings").onclick = async () => {
   } catch (e) { toast("Not saved: " + e.message, true); }
 };
 
+// ---- screens: what the clock shows in turn (GET/POST /screens) ----
+const SCREENS = [
+  { key: "time", name: "Time and date", d: "The clock's own face, always in the turn.", parts: [] },
+  { key: "status", name: "Status ring", d: "Unread items and the focus stretch over the time, when there are any.",
+    parts: [{ a0: -26, a1: -10, c: "#32cd32" }, { a0: -6, a1: 10, c: "#ff8c00" }, { a0: 14, a1: 30, c: "#40e0d0" }] },
+  { key: "forecast", name: "Weather", d: "The next 24 hours around the ring, the value now on the text line.",
+    parts: [{ a0: 0, a1: 180, c: "#ff9000" }, { a0: 180, a1: 360, c: "#0050ff" }] },
+  { key: "schedule", name: "Schedule", d: "The next 11 hours of events, pickups and hard stops.",
+    parts: [{ a0: 60, a1: 120, c: "#00ffff" }, { a0: 150, a1: 168, c: "#b8860b" }, { a0: 200, a1: 215, c: "#ff0000" }] },
+];
+function renderScreens(s) {  // s: what GET /screens says, or null when it can't be read
+  $("screens").innerHTML = SCREENS.map(x => {
+    const face = `<span class="chipled">${miniRing(x.parts)}</span>`;
+    if (x.key === "time")
+      return `<li class="item">${face}<div class="itext"><div class="t">${x.name}</div><div class="d">${x.d}</div></div><span class="meta">Always</span></li>`;
+    const st = s && s[x.key], gone = st && !st.available;
+    const d = gone ? "Not set up for this clock: it needs a [forecast] section in config.toml." : s ? x.d : "Unknown: the bridge isn't answering.";
+    return `<li class="item${st && st.on ? "" : " off"}"><label class="scr">${face}<span class="itext"><span class="t">${x.name}</span><span class="d">${d}</span></span>` +
+      `<input type="checkbox" class="switch" data-screen="${x.key}"${st && st.on ? " checked" : ""}${st && !gone ? "" : " disabled"}></label></li>`;
+  }).join("");
+}
+async function loadScreens() {
+  const asked = CLOCK;
+  let s = null;
+  try { s = await api("/screens"); } catch {}
+  if (CLOCK === asked) renderScreens(s);  // not an answer about the clock picked before this one
+}
+$("screens").addEventListener("change", async e => {
+  const b = e.target.closest("[data-screen]"); if (!b) return;
+  const name = SCREENS.find(x => x.key === b.dataset.screen).name, asked = CLOCK;
+  b.disabled = true;
+  try {
+    const s = await api("/screens", { [b.dataset.screen]: b.checked });
+    if (CLOCK === asked) renderScreens(s);
+    toast(`${name} ${b.checked ? "on" : "off"}; the clock follows within half a minute`);
+  } catch (err) { toast("Not changed: " + err.message, true); loadScreens(); }
+});
+
 // ---- notes ----
 async function loadNotes() {
   const all = await api("/notes").catch(() => []);
@@ -1137,8 +1185,9 @@ $("saveNudges").onclick = async () => {
 function dmHeading(h, dm, label) { h.dataset.dm = dm; h.innerHTML = dmSVG(dm) + `<span class="sr">${esc(label)}</span>`; }
 document.querySelectorAll("[data-dm]").forEach(h => dmHeading(h, h.dataset.dm, h.textContent));
 showBrightness(); drawQuiet(); preview(); showKind(); drawFace();
-loadOptions(); loadNotes(); loadStatus().then(() => { loadUnread(); loadSettings(); loadNudges(); });
-setInterval(() => { loadStatus(); loadUnread(); loadNotes(); api("/nudges").then(showSnooze).catch(() => {}); }, 10000);
+renderScreens(null);
+loadOptions(); loadNotes(); loadStatus().then(() => { loadUnread(); loadSettings(); loadNudges(); loadScreens(); });
+setInterval(() => { loadStatus(); loadUnread(); loadNotes(); loadScreens(); api("/nudges").then(showSnooze).catch(() => {}); }, 10000);
 let shownHour = new Date().getHours();
 setInterval(() => {
   drawFace(); renderFacts(); updateDues();

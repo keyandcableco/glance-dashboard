@@ -8,7 +8,7 @@ It's a custom scene in watch-face mode (8), saved in SLOT and rewritten only whe
 changes. The clock shows one thing at a time, so the ring never redraws while a countdown is on
 the ring or within QUIET_AFTER_S of an alert, which would cut either off. Saved scenes keep cycling
 until deleted, so it only ever uses SLOT, deletes it when there's nothing to show, and clears a
-leftover one after every (re)connect; with status_ring = false, clear() just removes it once.
+leftover one after every (re)connect. A screen switched off (screens.py) is deleted and stays off.
 The schedule ring (schedulering.py) is kept drawn the same way, in its own slot.
 
 Also here: the red light flash that alerts about something due now open with.
@@ -87,8 +87,8 @@ def busy(clock, now):
     return bool(clock.ring and clock.ring[0] > now) or now - clock.last_alert < QUIET_AFTER_S
 
 
-async def watch(clock, picture=picture, scene_bytes=scene_bytes, slot=SLOT, what="status ring"):
-    """Keep picture(clock, now) drawn in slot (empty: the slot deleted)."""
+async def watch(clock, picture=picture, scene_bytes=scene_bytes, slot=SLOT, what="status ring", screen="status"):
+    """Keep picture(clock, now) drawn in slot (empty, or the screen switched off: the slot deleted)."""
     shown, shown_at, client, counting = None, 0.0, None, False
     while True:
         await asyncio.sleep(20)
@@ -102,7 +102,7 @@ async def watch(clock, picture=picture, scene_bytes=scene_bytes, slot=SLOT, what
             continue
         if counting:  # a countdown or alert just ended: put the ring back
             counting, shown = False, None
-        want = picture(clock, now)
+        want = picture(clock, now) if clock.screens.on(screen) else ()
         if want == shown and now - shown_at < REFRESH_S:
             continue
         try:
@@ -113,10 +113,3 @@ async def watch(clock, picture=picture, scene_bytes=scene_bytes, slot=SLOT, what
             shown, shown_at = want, now
         except Exception as e:
             log.warning("%s: %s update failed: %s", clock.name, what, e)
-
-
-async def clear(clock, slot=SLOT):
-    """Turned off in config: remove a ring an earlier run left on the clock, once, then stop."""
-    while not clock.connected:
-        await asyncio.sleep(20)
-    await clock.write(bytes([SCENES_DELETE, 0, 0, slot]))
