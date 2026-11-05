@@ -83,8 +83,17 @@ def on_read(characteristic, **kwargs):
     return characteristic.value
 
 
+def adapter():
+    """The first Bluetooth adapter: after a reset it can come back as hci1, and bless looks only for hci0."""
+    try:
+        names = [n for n in os.listdir("/sys/class/bluetooth") if re.fullmatch(r"hci\d+", n)]
+    except OSError:
+        return None
+    return min(names, key=lambda n: int(n[3:]), default=None)
+
+
 async def start_time_server():
-    server = BlessServer(name="glanced")
+    server = BlessServer(name="glanced", adapter=adapter())
     server.read_request_func = on_read
     await server.add_new_service(CTS_SERVICE)
     for uuid, value in ((CTS_CURRENT_TIME, current_time_bytes()), (CTS_LOCAL_TIME_INFO, local_time_info_bytes())):
