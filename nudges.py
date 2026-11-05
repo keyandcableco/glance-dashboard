@@ -12,12 +12,11 @@ snooze_until (panel only) silences both until then.
 Activity is the X keyboard/mouse idle time (libXss) and, if a listener touches it, $GLANCE_VOICE_FILE.
 """
 import asyncio
-import ctypes
-import ctypes.util
 import datetime
 import json
 import logging
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -64,34 +63,57 @@ class Settings:
         return self.values
 
 
-class _XScreenSaverInfo(ctypes.Structure):
+# Prints the desktop's keyboard/mouse idle time in ms, or nothing. Run in its own process each time:
+# a bridge started at boot has no desktop until someone logs in, and Xlib exits the whole process
+# when its display goes away at logout. A service started at boot has no DISPLAY; the desktop is :0.
+X_IDLE = r"""
+import ctypes, ctypes.util, os
+class Info(ctypes.Structure):
     _fields_ = [("window", ctypes.c_ulong), ("state", ctypes.c_int), ("kind", ctypes.c_int),
                 ("til_or_since", ctypes.c_ulong), ("idle", ctypes.c_ulong), ("eventMask", ctypes.c_ulong)]
+x11 = ctypes.cdll.LoadLibrary(ctypes.util.find_library("X11"))
+xss = ctypes.cdll.LoadLibrary(ctypes.util.find_library("Xss"))
+x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+x11.XOpenDisplay.restype = ctypes.c_void_p
+x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+x11.XDefaultRootWindow.restype = ctypes.c_ulong
+xss.XScreenSaverQueryInfo.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(Info)]
+display = x11.XOpenDisplay(os.environ.get("DISPLAY", ":0").encode())
+info = Info()
+if display and xss.XScreenSaverQueryInfo(display, x11.XDefaultRootWindow(display), ctypes.byref(info)):
+    print(info.idle)
+"""
+
+
+async def x_idle():
+    """Seconds since the last keyboard or mouse input on the desktop; None if there's no desktop or libXss."""
+    proc = await asyncio.create_subprocess_exec(sys.executable, "-I", "-c", X_IDLE,
+                                                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), 10)
+        return int(out) / 1000
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+    except ValueError:
+        pass
+    return None
 
 
 class Idle:
     """Seconds since the last keyboard, mouse or speech; None if none of them can be read."""
 
     def __init__(self):
-        self.display = self.xss = None
-        try:
-            x11 = ctypes.cdll.LoadLibrary(ctypes.util.find_library("X11"))
-            self.xss = ctypes.cdll.LoadLibrary(ctypes.util.find_library("Xss"))
-            x11.XOpenDisplay.restype = ctypes.c_void_p
-            x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
-            self.display = x11.XOpenDisplay(None)
-            self.root = x11.XDefaultRootWindow(self.display) if self.display else None
-            self.xss.XScreenSaverAllocInfo.restype = ctypes.POINTER(_XScreenSaverInfo)
-            self.xss.XScreenSaverQueryInfo.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(_XScreenSaverInfo)]
-            self.info = self.xss.XScreenSaverAllocInfo()
-        except (OSError, TypeError, AttributeError) as e:
-            log.warning("no X idle time (%s); using speech only", e)
-            self.display = None
+        self.desktop = None  # whether the last reading reached the desktop, to log changes once
 
-    def seconds(self):
+    async def seconds(self):
         times = []
-        if self.display and self.xss.XScreenSaverQueryInfo(self.display, self.root, self.info):
-            times.append(self.info.contents.idle / 1000)
+        x = await x_idle()
+        if (x is not None) != self.desktop:
+            self.desktop = x is not None
+            log.info("X idle time %s", "from the desktop" if self.desktop else "unavailable; using speech only")
+        if x is not None:
+            times.append(x)
         try:
             times.append(time.time() - os.path.getmtime(VOICE))
         except OSError:
@@ -120,7 +142,7 @@ async def watch(clock):
         if now < v["snooze_until"]:
             active_since = clock.focus = None
             continue
-        quiet = idle.seconds()
+        quiet = await idle.seconds()
         if not v["breaks"] or quiet is None or quiet >= v["pause_minutes"] * 60:
             active_since = None  # off, or walked away: that was the break
         elif active_since is None:

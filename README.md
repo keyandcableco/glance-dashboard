@@ -60,9 +60,9 @@ of his `Glance.proto`, fixed so `protoc` accepts it. Everything here builds on t
 - Linux with BlueZ ≥ 5.50 (`bluetoothctl`) and a Bluetooth LE adapter. Python ≥ 3.11.
   Developed on Debian 12 with BlueZ 5.66.
 - For text alerts from desktop notifications: `dbus-monitor` (Debian: `dbus-bin`).
-- For break nudges: an X11 session and libXss (Debian: `libxss1`). The bridge needs `DISPLAY`: if it runs
-  as a user service that starts before your desktop, run `systemctl --user import-environment DISPLAY XAUTHORITY`
-  from your session startup and restart it, or break nudges silently fall back to `$GLANCE_VOICE_FILE` only.
+- For break nudges: an X11 session and libXss (Debian: `libxss1`). The bridge uses `$DISPLAY`, or `:0` when
+  it has none (a user service started at boot), read by a short-lived helper process every 30 s; with no
+  desktop (before login, after logout) it counts only `$GLANCE_VOICE_FILE`.
 - For loose voice phrasing: an Anthropic API key (`anthropic_api_key` file or `ANTHROPIC_API_KEY`).
 
 ## Setup
@@ -97,6 +97,8 @@ cp config.example.toml config.toml   # then edit
 ```
 
 or as a user service: `cp contrib/glanced.service ~/.config/systemd/user/ && systemctl --user enable --now glanced`.
+A user service runs only while you're logged in; `loginctl enable-linger` starts it at boot instead,
+and keeps it running after you log out.
 
 The bridge skips clocks that aren't paired (connecting to an unpaired one makes many desktops pop a
 Bluetooth notice every few seconds) and checks again every minute.
