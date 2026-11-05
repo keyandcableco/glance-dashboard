@@ -20,6 +20,7 @@ from aiohttp import web
 from bleak import BleakClient
 from bless import BlessServer, GATTAttributePermissions, GATTCharacteristicProperties
 
+import animscreen
 import brain
 import calwatch
 import forecast
@@ -33,6 +34,7 @@ import nudges
 import pickups
 import schedulering
 import screens
+import screensaver
 import textwatch
 import unread
 from glance import CHAR, NOTIFY, PRIORITIES, build_notice
@@ -109,7 +111,7 @@ class Clock:
         self.unread = unread.Unread(name)
         self.ring = None  # (due epoch, unread item id) of the countdown on the ring
         self.ring_unknown = True  # after a start the clock may still run a countdown we no longer know about
-        self.last_alert = 0.0  # when an alert or countdown was last sent (the status ring waits after it)
+        self.last_alert = 0.0  # when an alert or countdown was last sent (the screens wait after it)
         self.events = []  # calendar events (uid, start, title, end) in the next 24 h, from calwatch
         self.flashing = asyncio.Lock()  # one flash and its notice at a time: flashes share one slot
 
@@ -653,8 +655,8 @@ def make_app(clocks, shop_url=None):
         return web.json_response(pick(request).screens.json())
 
     async def set_screens(request):
-        """{"status", "forecast", "schedule": true or false}; each screen's watcher puts it on or takes
-        it off the clock within half a minute (later if an alert or countdown is showing)."""
+        """{"status", "forecast", "schedule", "animation", "screensaver": true or false}; each screen's watcher puts
+        it on or takes it off the clock within half a minute (later if an alert is showing)."""
         body = await read_body(request)
         clock = pick(request, body)
         try:
@@ -705,7 +707,9 @@ async def main():
         clock.screens = screens.Screens(name, c)
         watchers = {"connection": clock.keep_connected, "replay": lambda clock=clock: unread.replay(clock),
                     "pickups": lambda clock=clock: pickups.watch(clock), "nudges": lambda clock=clock: nudges.watch(clock),
-                    "ring": lambda clock=clock: statusring.watch(clock), "schedule": lambda clock=clock: schedulering.watch(clock)}
+                    "ring": lambda clock=clock: statusring.watch(clock), "schedule": lambda clock=clock: schedulering.watch(clock),
+                    "animation": lambda clock=clock: animscreen.watch(clock),
+                    "screensaver": lambda clock=clock: screensaver.watch(clock)}
         if "mail" in c:
             watchers["mail"] = lambda clock=clock, c=c: mailwatch.watch(clock, c["mail"])
         if "texts" in c:

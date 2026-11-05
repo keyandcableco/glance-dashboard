@@ -13,6 +13,8 @@ port = 8740
 address = "AA:BB:CC:DD:EE:FF"   # bluetoothctl devices, after pairing (see README)
 # status_ring = false           # start with the status ring screen off (the panel's Screens switch it)
 # schedule_ring = false         # start with the schedule ring screen off
+# animation_screen = false      # start with the animation screen (burn-in fire, holidays) off
+# screensaver = true            # start with the screensaver screen (a different animation each turn) on
 
 # Optional: alert on emails in a Thunderbird inbox (its local mbox file).
 [clocks.office.mail]
@@ -39,6 +41,8 @@ latitude = 40.0
 longitude = -75.0
 show = "humidity"   # humidity | temperature | rain
 source = "nws"      # nws (US, any use) | open-meteo (worldwide, non-commercial use only)
+# every_minutes = 10  # on the clock for the first show_minutes of every every_minutes;
+# show_minutes = 2    # every_minutes = 0 keeps it on all the time
 
 # Optional: hyperfocus nudges (the panel can change these later).
 [clocks.office.nudges]

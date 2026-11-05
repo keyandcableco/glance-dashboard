@@ -1,12 +1,13 @@
 """Status ring: an always-on drawing on the LED rings, under the clock's own time and date.
 
 Outer ring (0): one 3-pixel segment per unread item (the oldest MAX_ITEMS), from 12 o'clock, in the
-item's own color. Inner ring (3): the current active stretch growing toward the break nudge in
+item's own color; the oldest one pulses. Inner ring (3): the current active stretch growing toward the break nudge in
 ARC_STEPS steps (green, then orange past FOCUS_WARN of the way); only while break reminders are on.
 
 It's a custom scene in watch-face mode (8), saved in SLOT and rewritten only when the picture
-changes. The clock shows one thing at a time, so the ring never redraws while a countdown is on
-the ring or within QUIET_AFTER_S of an alert, which would cut either off. Saved scenes keep cycling
+changes. It never redraws within QUIET_AFTER_S of an alert (or a countdown's start), which might cut
+it off, nor around a countdown's stage changes and end, where the clock plays its own alarm; writes while
+a countdown runs leave it running (seen 2026-11-05). Saved scenes keep cycling
 until deleted, so it only ever uses SLOT, deletes it when there's nothing to show, and clears a
 leftover one after every (re)connect. A screen switched off (screens.py) is deleted and stays off.
 The schedule ring (schedulering.py) is kept drawn the same way, in its own slot.
@@ -25,6 +26,7 @@ PRIORITY = 16  # below alerts (48 high, 80 critical), so an alert always wins
 LIFETIME = 50 * 60 * 30  # frames (50 fps): 30 minutes; rewritten well before that
 REFRESH_S = 15 * 60
 QUIET_AFTER_S = 45
+QUIET_AROUND_ALARM_S = (10, 30)  # seconds before and after a stage change or a countdown's end
 ITEM_PX, ITEM_GAP, MAX_ITEMS = 3, 1, 12  # 12 × 4 = 48 pixels
 ARC_STEPS = 12
 FOCUS_WARN = 0.8
@@ -60,11 +62,17 @@ def picture(clock, now):
     return tuple(segs)
 
 
+def ring_of(seg):
+    return seg >> 6 & 3
+
+
 def scene_bytes(segs):
-    scene = pb.CustomScene()
-    obj = scene.object.add(method=pb.CustomScene.Object.Fill, lifeTime=LIFETIME,
-                           result=pb.CustomScene.Object.OK)
-    obj.fill.segment.extend(segs)
+    scene, obj = pb.CustomScene(), pb.CustomScene.Object
+    scene.object.add(method=obj.Fill, lifeTime=LIFETIME, result=obj.OK).fill.segment.extend(segs)
+    if segs and ring_of(segs[0]) == 0:  # picture() puts the items first, so this is the oldest unread item
+        pulse = scene.object.add(method=obj.AreaAnimation, lifeTime=LIFETIME).areaAnimation
+        pulse.type = obj.AreaAnimationData.Pulse  # the clock's default rise and fall: a breath every 2 s
+        pulse.area.append(segs[0])
     return bytes([SCENE, PRIORITY, MODE_WATCHFACE, SLOT]) + scene.SerializeToString()
 
 
@@ -83,8 +91,26 @@ def flash_bytes():
 
 
 def busy(clock, now):
-    """A countdown on the ring, or an alert that may still be showing."""
-    return bool(clock.ring and clock.ring[0] > now) or now - clock.last_alert < QUIET_AFTER_S
+    """An alert that may still be showing (a countdown's start counts as one), or a countdown's stage
+    change or end, where the clock plays its own alarm."""
+    return now - clock.last_alert < QUIET_AFTER_S or near_alarm(clock, now)
+
+
+def near_alarm(clock, now):
+    """Within QUIET_AROUND_ALARM_S of a staged timer's stage change or the ring countdown's end: writes
+    during a countdown leave it running, but none was tried right on an alarm."""
+    before, after = QUIET_AROUND_ALARM_S
+    ends = [clock.ring[0]] if clock.ring else []
+    for item in clock.unread.items:
+        t = item.get("start")
+        for _label, seconds in (item.get("stages") or ()) if t else ():
+            t += seconds
+            ends.append(t)
+    return any(-before < now - end < after for end in ends)
+
+
+def counting_down(clock, now):
+    return bool(clock.ring and clock.ring[0] > now)
 
 
 async def watch(clock, picture=picture, scene_bytes=scene_bytes, slot=SLOT, what="status ring", screen="status"):
@@ -100,7 +126,7 @@ async def watch(clock, picture=picture, scene_bytes=scene_bytes, slot=SLOT, what
         if busy(clock, now):
             counting = True
             continue
-        if counting:  # a countdown or alert just ended: put the ring back
+        if counting:  # an alert just ended: put the ring back
             counting, shown = False, None
         want = picture(clock, now) if clock.screens.on(screen) else ()
         if want == shown and now - shown_at < REFRESH_S:

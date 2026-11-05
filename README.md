@@ -35,15 +35,23 @@ of his `Glance.proto`, fixed so `protoc` accepts it. Everything here builds on t
   renamed or cancelled but not moved.
 - **Forecast graph**: the next 24 hours of humidity, temperature or chance of rain drawn around the ring
   by the clock's own forecast display, with the current value on the text line (US National Weather
-  Service, or Open-Meteo for non-commercial use elsewhere).
+  Service, or Open-Meteo for non-commercial use elsewhere). It's on the clock part of the time, by
+  default 2 minutes in every 10 (`every_minutes`, `show_minutes`; `every_minutes = 0` for always).
 - **Unread list** that replays silently every 5 minutes until cleared.
 - **Status ring**, always on under the clock's time and date: one colored segment per unread item on the
-  outer ring (the oldest 12), and, while break reminders are on, your current active stretch growing
-  toward the break nudge on the inner ring. It steps aside for alerts and countdowns.
-- **Screens**: the clock shows its time and date, the status ring, the forecast and the schedule ring in
-  turn, a few seconds each. Switch each of the last three on or off per clock on the panel (it's kept in
-  `screens-<name>.json`); `status_ring = false` or `schedule_ring = false` in a clock's section only sets
-  where it starts.
+  outer ring (the oldest 12; the oldest one pulses), and, while break reminders are on, your current active
+  stretch growing toward the break nudge on the inner ring. It steps aside for alerts.
+- **Animation screen**: the clock's own fire animation over its time while a burn-in runs (a timer or
+  staged timer with "burn" in its name or any stage), and a holiday animation on holidays.
+- **Screensaver** (off unless switched on): something different each time its screen comes round: the
+  clock's own animations (fire, flowers, fan, wheel, sun, storm, clouds) in changing colours; rain, snow
+  and fog; drawn ones where every LED has its own colour (a rainbow with a wave over it, confetti, a
+  sweep, a rainbow painting itself in).
+- **Screens**: the clock shows its time and date, the status ring, the forecast, the schedule ring, the
+  animation screen and the screensaver in turn, about 15 seconds each (the clock picks the next one, often
+  the same one again). Switch each of the last five on or off per clock on the panel (it's kept in
+  `screens-<name>.json`); `status_ring = false`, `schedule_ring = false`, `animation_screen = false` or
+  `screensaver = true` in a clock's section only sets where it starts.
 - **Hyperfocus nudges**: a break reminder after a long stretch of keyboard/mouse activity, wrap-up and
   closing-time nudges. Snooze from the panel.
 - **Voice**: `clockvoice.py` takes a transcribed sentence ("Sam's swinging by for the Juno after lunch").
@@ -144,7 +152,7 @@ All on `http://127.0.0.1:8740`; every call takes an optional `clock` (name), def
 | `GET/POST /notes` | `text` to add; `id` with `done` or `delete` | |
 | `GET/POST /settings` | `brightness, night_mode, dnd, dnd_from, dnd_till` | The clock's own settings |
 | `GET/POST /nudges` | `breaks, break_minutes, pause_minutes, closing, closing_days, snooze_minutes` | |
-| `GET/POST /screens` | `status, forecast, schedule` (each `true` or `false`) | Which screens the clock shows in turn; applied within half a minute |
+| `GET/POST /screens` | `status, forecast, schedule, animation, screensaver` (each `true` or `false`) | Which screens the clock shows in turn; applied within half a minute |
 | `GET /status`, `GET /options` | | Connection, unread counts, the active stretch toward a break nudge (`focus`); the names of colors, sounds, icons |
 
 `glance.py --list` prints the colors, animations, sounds and icons (`{bell}`, `{heart}`, …). `/notify` refuses
@@ -183,7 +191,7 @@ an unknown `{name}`; everywhere else (email subjects, calendar titles, names) it
 
 `glanced.py` the bridge · `glance.py` protocol helpers + one-shot CLI · `config.py` · `mailwatch.py`,
 `textwatch.py`, `calwatch.py` sources · `pickups.py` timers/pickups/stops · `unread.py` · `nudges.py` ·
-`notes.py` · `statusring.py` (and the light flash) · `schedulering.py` · `forecast.py` · `screens.py` · `shopapp.py` optional shop app · `brain.py` Haiku · `clockvoice.py` voice front end · `panel.html` · `pickup` CLI ·
+`notes.py` · `statusring.py` (and the light flash) · `schedulering.py` · `forecast.py` · `animscreen.py` · `screensaver.py` · `screens.py` · `shopapp.py` optional shop app · `brain.py` Haiku · `clockvoice.py` voice front end · `panel.html` · `pickup` CLI ·
 `set_setting.py` · `contrib/`
 
 ## License

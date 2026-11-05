@@ -7,9 +7,16 @@ Configured per clock in config.toml [clocks.<name>.forecast]:
     show = "humidity"     # humidity | temperature | rain
     source = "nws"        # nws: US National Weather Service (free, any use, US only)
                           # open-meteo: worldwide, free for non-commercial use only
-It's a saved scene (SLOT), refreshed every REFRESH_S, and like the status ring it waits while an
-alert or countdown is showing. Switched off (screens.py), or with no [forecast] section, it's deleted
-(again after every reconnect) and nothing is fetched.
+    every_minutes = 10    # on the clock for the first show_minutes (2 or more) of every every_minutes;
+    show_minutes = 2      # every_minutes = 0 keeps it on all the time. Switched on on the panel, it's
+                          # shown at once for show_minutes.
+Each screen gets about 15 s a turn and the clock often picks the same one again, so with only two or
+three screens an always-on forecast was up a third to half of the time; part-time keeps it a glance.
+It's a saved scene (SLOT), written at the start of each window (and every REFRESH_S while always on),
+deleted at its end, and like the status ring it waits while an alert is showing. Values
+are fetched at most every REFRESH_S and shifted to the current hour in between. Switched off
+(screens.py), or with no [forecast] section, it's deleted (again after every reconnect) and nothing
+is fetched.
 """
 import asyncio
 import calendar
@@ -27,6 +34,7 @@ SLOT = 6
 FORECAST = 7
 RING_AND_TEXT = 24
 REFRESH_S = 30 * 60
+EVERY_MINUTES, SHOW_MINUTES = 10, 2
 USER_AGENT = "glance-dashboard (github.com/keyandcableco/glance-dashboard)"  # NWS asks apps to identify themselves
 ICON, DEGREE = 0xC2, 0xB0  # template: 0xC2 + icon code; 0x08 is replaced by the current value
 
@@ -80,6 +88,21 @@ def scene_bytes(values, show, now):
     return bytes([FORECAST, statusring.PRIORITY, RING_AND_TEXT, SLOT]) + scene.SerializeToString()
 
 
+def in_window(now, every_s, show_s):
+    """Whether the forecast belongs on the clock now: always with every_s 0, else for the first show_s
+    of each every_s (on the epoch, so at :00, :10, :20... with the defaults)."""
+    return not every_s or now % every_s < show_s
+
+
+def hour_start(epoch):
+    return datetime.datetime.fromtimestamp(epoch).replace(minute=0, second=0, microsecond=0).timestamp()
+
+
+def from_hour(values, fetched, now):
+    """The hourly values fetched at `fetched` (they start at that hour), from the current hour on."""
+    return values[round((hour_start(now) - hour_start(fetched)) / 3600):]
+
+
 async def watch(clock, cfg):
     show = cfg.get("show", "humidity")
     if show not in SHOWS:
@@ -88,32 +111,56 @@ async def watch(clock, cfg):
     source = cfg.get("source", "nws")
     fetch = open_meteo_hours if source == "open-meteo" else nws_hours
     field = SHOWS[show][1] if source == "open-meteo" else SHOWS[show][0]
-    sent_at, removed, client = 0.0, False, None
+    try:
+        every_s = float(cfg.get("every_minutes", EVERY_MINUTES)) * 60
+        show_s = float(cfg.get("show_minutes", SHOW_MINUTES)) * 60
+        if not (0 <= every_s < 10 ** 7 and 0 < show_s < 10 ** 7):
+            raise ValueError
+    except (TypeError, ValueError):
+        log.warning("%s: forecast every_minutes and show_minutes should be numbers; using %d of every %d",
+                    clock.name, SHOW_MINUTES, EVERY_MINUTES)
+        every_s, show_s = EVERY_MINUTES * 60.0, SHOW_MINUTES * 60.0
+    show_s = max(show_s, 120.0)  # checked every 30 s, and a fetch can take that long: 2 minutes at least
+    values, fetched, next_fetch = [], 0.0, 0.0
+    written, on_clock, client = 0.0, None, None  # on_clock None: not known (a new link)
+    was_on, extra_until = clock.screens.on("forecast"), 0.0  # switched on on the panel: shown at once, for show_s
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as http:
         while True:
             await asyncio.sleep(30)
             now = time.time()
-            if not clock.screens.on("forecast"):
-                sent_at = 0.0  # drawn again soon after it's switched back on
-                if clock.client is not client:  # a new link: the clock may still hold one
-                    client, removed = clock.client, False
-                if not removed and clock.connected and not statusring.busy(clock, now):
+            if clock.client is not client:  # a new link: the clock may still hold a forecast, or have lost ours
+                client, on_clock = clock.client, None
+            is_on = clock.screens.on("forecast")
+            if is_on and not was_on:
+                extra_until = now + show_s
+            was_on = is_on
+            if not clock.connected or statusring.busy(clock, now):
+                continue
+            if not (is_on and (in_window(now, every_s, show_s) or now < extra_until)):
+                if on_clock is not False:
                     try:
                         await clock.write(bytes([statusring.SCENES_DELETE, 0, 0, SLOT]))
-                        removed = True
+                        on_clock = False
                     except Exception as e:
                         log.warning("%s: removing the forecast failed: %s", clock.name, e)
                 continue
-            removed = False
-            if now - sent_at < REFRESH_S or not clock.connected or statusring.busy(clock, now):
+            if on_clock and now - written < REFRESH_S:
+                continue
+            if now >= next_fetch:
+                try:
+                    got = await fetch(http, cfg, field)
+                    if not got:
+                        raise ValueError("no hourly values")
+                    values, fetched, next_fetch = got, now, now + REFRESH_S
+                    log.info("%s: forecast (%s): now %s, range %s-%s", clock.name, show, got[0], min(got), max(got))
+                except (aiohttp.ClientError, asyncio.TimeoutError, KeyError, ValueError) as e:
+                    log.warning("%s: forecast failed: %s", clock.name, e)
+                    next_fetch = now + 5 * 60  # try again in 5 minutes; meanwhile the last values, if any
+            ahead = from_hour(values, fetched, now)
+            if not ahead:
                 continue
             try:
-                values = await fetch(http, cfg, field)
-                if not values:
-                    raise ValueError("no hourly values")
-                await clock.write(scene_bytes(values, show, datetime.datetime.now()))
-                sent_at = now
-                log.info("%s: forecast (%s): now %s, range %s-%s", clock.name, show, values[0], min(values), max(values))
-            except (aiohttp.ClientError, asyncio.TimeoutError, KeyError, ValueError) as e:
-                log.warning("%s: forecast failed: %s", clock.name, e)
-                sent_at = now - REFRESH_S + 5 * 60  # try again in 5 minutes
+                await clock.write(scene_bytes(ahead, show, datetime.datetime.fromtimestamp(now)))  # the now `ahead` was cut at
+                on_clock, written = True, now
+            except Exception as e:
+                log.warning("%s: forecast update failed: %s", clock.name, e)

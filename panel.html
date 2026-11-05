@@ -216,6 +216,7 @@
   .ptrack, .pring { fill: none; stroke-width: 6.5; stroke-linecap: round; stroke-dasharray: 0 1; }
   .ptrack { stroke: rgba(255,255,255,.07); }
   .pring.pulse { animation: pulse 1.8s ease-in-out infinite; }
+  .led.pulse { animation: pulse 2s ease-in-out infinite; }  /* the oldest unread item breathes, as on the clock */
   .pring.chase { stroke-dasharray: 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 37; animation: chase 2.4s steps(48) infinite; }
   .pring.flash { animation: flash .375s linear 8; }  /* the light flash: 3 s of red with a white strobe, under 3 flashes a second */
   @keyframes pulse { 50% { opacity: .18; } }
@@ -264,7 +265,7 @@
     .face { width: 70%; margin: 0 auto; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .pring.pulse, .pring.chase, .pring.flash, .sweep.run, .saylog .reply .cled.wait { animation: none; }
+    .pring.pulse, .pring.chase, .pring.flash, .led.pulse, .sweep.run, .saylog .reply .cled.wait { animation: none; }
     *, *::before { transition: none !important; }
   }
 </style>
@@ -492,7 +493,7 @@
       <section class="panel" id="secScreens" aria-labelledby="hScreens">
         <div class="sh"><h2 class="dm" id="hScreens" data-dm="SCREENS">Screens</h2></div>
         <ul class="list" id="screens"></ul>
-        <p class="hint">The clock shows these in turn, a few seconds each; how long is up to the clock. A switch takes effect within half a minute, or once an alert or countdown that's showing is over.</p>
+        <p class="hint">The clock shows these in turn, about 15 seconds each, and picks the next one itself (often the same one again). The weather is on only a couple of minutes in every ten. A switch takes effect within half a minute, or once an alert that&rsquo;s showing is over.</p>
       </section>
     </div>
   </div>
@@ -691,12 +692,13 @@ let faceMatrix;
   $("faceSheen").setAttribute("d", arc(182, -66, -18));
 })();
 
-function setLed(k, i, v) {  // v: null (off) or [color, opacity]
-  const key = v ? v[0] + v[1].toFixed(2) : "";
+function setLed(k, i, v) {  // v: null (off) or [color, opacity, pulsing]
+  const key = v ? v[0] + v[1].toFixed(2) + (v[2] ? "p" : "") : "";
   if (faceKey[k][i] === key) return;
   faceKey[k][i] = key;
   faceLeds[k][i].style.fill = v ? v[0] : "";
   faceLeds[k][i].style.fillOpacity = v ? v[1] : "";
+  faceLeds[k][i].classList.toggle("pulse", !!(v && v[2]));
 }
 
 function countdown(now) {  // the countdown on the clock's ring (see refresh_ring in glanced.py)
@@ -738,7 +740,7 @@ function drawFace(now = Date.now()) {
   } else if (link && !(S.screens && S.screens.status && !S.screens.status.on)) {  // as statusring.picture() draws it
     S.unread.slice(0, ITEM_MAX).forEach((it, k) => {
       const c = led(it.color || "Lime");
-      if (c) for (let j = 0; j < ITEM_PX; j++) L[0][k * (ITEM_PX + ITEM_GAP) + j] = [c, 1];
+      if (c) for (let j = 0; j < ITEM_PX; j++) L[0][k * (ITEM_PX + ITEM_GAP) + j] = [c, 1, k === 0];  // the oldest pulses
     });
     const f = S.status.focus;
     if (f) {
@@ -1092,6 +1094,10 @@ const SCREENS = [
     parts: [{ a0: 0, a1: 180, c: "#ff9000" }, { a0: 180, a1: 360, c: "#0050ff" }] },
   { key: "schedule", name: "Schedule", d: "The next 11 hours of events, pickups and hard stops.",
     parts: [{ a0: 60, a1: 120, c: "#00ffff" }, { a0: 150, a1: 168, c: "#b8860b" }, { a0: 200, a1: 215, c: "#ff0000" }] },
+  { key: "animation", name: "Animations", d: "Fire while a burn-in timer runs; a holiday animation on holidays.",
+    parts: [{ a0: 0, a1: 40, c: "#ff4500" }, { a0: 90, a1: 130, c: "#ff4500" }, { a0: 180, a1: 220, c: "#ff4500" }, { a0: 270, a1: 310, c: "#ff4500" }] },
+  { key: "screensaver", name: "Screensaver", d: "Something different each time it comes round: the clock's own animations, rain, snow and fog, rainbows, confetti and a colour sweep; steps aside during a countdown.",
+    parts: [{ a0: 0, a1: 60, c: "#ff0000" }, { a0: 60, a1: 120, c: "#ff8c00" }, { a0: 120, a1: 180, c: "#00ff00" }, { a0: 180, a1: 240, c: "#00ffff" }, { a0: 240, a1: 300, c: "#4169e1" }, { a0: 300, a1: 360, c: "#8a2be2" }] },
 ];
 function renderScreens(s) {  // s: what GET /screens says, or null when it can't be read
   S.screens = s; drawFace();  // the status ring screen switched off leaves the outer ring dark

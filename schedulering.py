@@ -13,7 +13,7 @@ inside a meeting still shows.
 
 Blocks run from the current half hour to HOURS_AHEAD out, so they never wrap round onto now, and stop
 at midnight. It's a saved scene in SLOT, kept drawn like the status ring (statusring.watch): rewritten
-when the blocks change, never while an alert or countdown is showing, and deleted while the screen is
+when the blocks change, never while an alert is showing, and deleted while the screen is
 switched off (screens.py).
 """
 import calendar
