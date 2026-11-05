@@ -11,6 +11,7 @@ nudges-*.json
 screens-*.json
 calendars-*
 notes.json
+pickups-sync.json
 *.tmp
 
 # Local

@@ -132,6 +132,16 @@ works (ours is a private Flask shop system), given these replies: `GET /api/cloc
 the toggle → `{"since", "to_assign"}`; other POSTs → an object whose `say` is spoken (or `"ok": false` on
 failure); `/api/followups/due` → `{"due": [...]}`.
 
+Pickups are shared with it too (`pickupsync.py`, every minute): one added or changed on a clock is sent
+(`POST /api/pickups {"name", "at", "source": "glance", "ref"}`, `"at"` ISO 8601 with offset, `"ref"` the clock
+item's id so a resend updates the same one, plus `"id"` once known; the reply's `pickup.id` is kept), one
+cleared before its time is cancelled (`POST /api/pickups/cancel {"id"}`), and `GET /api/pickups`
+(`{"pickups": [{"id", "name", "at", "source"}], "cancelled": [ids]}`) brings the shop app's own ones onto the
+first clock and takes the cancelled ones off; one it doesn't list at all is sent again. A shop app without
+these endpoints (404) is left alone.
+Calendar events with a UID like `pickup-12@keyandcable-shop` (our shop app's calendar feed) are skipped by the
+calendar watcher, since those pickups are already on the clock.
+
 ### Environment variables
 
 `GLANCE_CONFIG` (path to the config), `GLANCE_URL` (bridge address for `pickup`, `clockvoice.py` and the

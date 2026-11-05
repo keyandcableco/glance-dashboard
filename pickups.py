@@ -79,9 +79,10 @@ def schedule(item, due):
         item.pop(key, None)
 
 
-async def add(clock, name, when, kind="pickup"):
+async def add(clock, name, when, kind="pickup", due=None):
+    """when as parse_when takes it, or due (epoch seconds) instead."""
     spec = KINDS[kind]
-    due = parse_when(when)
+    due = parse_when(when) if due is None else due
     item = clock.unread.add({"text": "", **spec["look"]}, kind)
     item.update(kind=kind, name=name)
     schedule(item, due)
@@ -216,6 +217,8 @@ async def move(src, dst, item, name=None, due=None):
     was set. Added to the destination before it's removed from the source."""
     moved = dst.unread.add({"text": "", **KINDS[item["kind"]]["look"]}, item["kind"])
     moved.update(kind=item["kind"], name=item.get("name", ""), time=item.get("time", moved["time"]))
+    if item.get("shop_id"):  # the same pickup in the shop app (pickupsync), not a new one
+        moved["shop_id"] = item["shop_id"]
     result = await change(dst, moved, name=name, due=due if due is not None else item["due"])
     src.unread.clear(item["id"])
     await src.refresh_ring()

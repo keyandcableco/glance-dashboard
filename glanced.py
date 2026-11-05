@@ -33,6 +33,7 @@ import mailwatch
 import notes
 import nudges
 import pickups
+import pickupsync
 import schedulering
 import screens
 import screensaver
@@ -759,6 +760,8 @@ async def main():
         if not tasks and cfg.get("shop_app", {}).get("url"):  # follow-up nags go to the first clock
             watchers["followups"] = lambda clock=clock: shopapp.watch_followups(clock, cfg["shop_app"])
         tasks += [asyncio.create_task(supervised(f"{name} {label}", start)) for label, start in watchers.items()]
+    if cfg.get("shop_app", {}).get("url"):  # pickups both ways with the shop app, across all clocks
+        tasks.append(asyncio.create_task(supervised("pickup sync", lambda: pickupsync.watch(clocks, cfg["shop_app"]["url"]))))
     runner = web.AppRunner(make_app(clocks, cfg.get("shop_app", {}).get("url")))
     await runner.setup()
     port = cfg.get("port", 8740)

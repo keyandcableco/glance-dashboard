@@ -12,6 +12,7 @@ import contextlib
 import datetime
 import json
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -26,6 +27,7 @@ STAGES = (15, 5, 0)  # minutes before start
 EXPIRE_MINUTES = 30
 LOOK = {"color": "Aqua", "anim": "Fan"}
 ALERT = {"sound": "Rise", "priority": "critical"}
+SHOP_PICKUP_UID = re.compile(r"pickup-\d+@keyandcable-shop")  # the shop app's calendar feed
 
 log = logging.getLogger("glanced.calendar")
 
@@ -50,6 +52,8 @@ def upcoming(ics_bytes, hours=24):
         elif end.tzinfo is None:
             end = end.astimezone()
         title = " ".join(str(ev.get("SUMMARY", "Event")).split())
+        if SHOP_PICKUP_UID.fullmatch(str(ev.get("UID", ""))):  # already on the clock as a pickup (pickupsync)
+            continue
         events.append((str(ev.get("UID", title)), start.timestamp(), title, max(start, end).timestamp()))
     return events
 
