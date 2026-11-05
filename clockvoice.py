@@ -35,6 +35,7 @@ def words_to_digits(text):
     t = re.sub(r"\b(?:an?|one) (?:hour and a half|and a half hours?)\b", "90 minutes", t)
     t = re.sub(r"\b(?:half an hour|a half hour)\b", "30 minutes", t)
     t = re.sub(r"\b(?:a quarter of an hour|quarter of an hour|a quarter hour)\b", "15 minutes", t)
+    t = re.sub(r"\bhalf a minute\b", "30 seconds", t)
     t = re.sub(r"\b(\d+) and a half hours?\b", lambda m: f"{int(m[1]) * 60 + 30} minutes", t)
 
     def number(m):
@@ -45,9 +46,12 @@ def words_to_digits(text):
 
 
 def duration(t):
-    """'1 hour 30 minutes' / '45 minutes' / '2 hours' -> bridge 'when' like '1h30' / '45m', else None."""
+    """'1 hour 30 minutes' / '45 minutes' / '2 hours' / '30 seconds' -> bridge 'when' like '1h30' / '45m' / '30s', else None."""
     h = re.search(r"(\d+) ?(?:hours?|hrs?)\b", t)
     m = re.search(r"(\d+) ?(?:minutes?|mins?)\b", t)
+    s = re.search(r"(\d+) ?(?:seconds?|secs?)\b", t)
+    if s:
+        return f"{int(h[1] if h else 0) * 3600 + int(m[1] if m else 0) * 60 + int(s[1])}s"
     if not h and not m:
         return None
     return f"{h[1]}h{m[1] if m else ''}" if h else f"{m[1]}m"
@@ -64,6 +68,7 @@ def clock_time(t):
 
 
 def strip_time(t):
+    t = re.sub(r"\b(?:and\s+)?(?:in|for)?\s*\d+ ?(?:seconds?|secs?)\b", " ", t)
     t = re.sub(r"\b(?:in|for|at|by)?\s*\d+ ?(?:hours?|hrs?)(?:\s*(?:and\s*)?\d+ ?(?:minutes?|mins?))?\b", " ", t)
     t = re.sub(r"\b(?:in|for|at|by)?\s*\d+ ?(?:minutes?|mins?)\b", " ", t)
     t = re.sub(r"\b(?:in|for|at|by|around)?\s*\d{1,2}(?::\d{2})? ?(?:a\.?m\.?|p\.?m\.?|o'?clock)?\b", " ", t)

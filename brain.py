@@ -16,7 +16,7 @@ KEY_FILE = Path(__file__).parent / "anthropic_api_key"
 
 SYSTEM = """You turn a short spoken command into exactly one call to one of your tools. The words were \
 transcribed from speech across a workshop, so expect missing punctuation and misheard words; go by \
-the likely meaning. Times: give `minutes` for a duration from now ("in half an hour" = 30) or `at` \
+the likely meaning. Times: give `minutes` for a duration from now ("in half an hour" = 30, "45 seconds" = 0.75) or `at` \
 as 24-hour HH:MM for a clock time ("after lunch" = 13:00, "end of day" = 17:00); set the other to 0 or \
 empty. Timer, pickup and stop labels are short (a few words) and in capitals; text for the shop app \
 (switch_job, wait_on_customer, customer_replied) stays as said, so names still match. `clock` is empty unless the speaker \
@@ -28,7 +28,7 @@ saying what you can do instead."""
 
 # Plain types with empty defaults: strict tools allow only 16 nullable fields in all
 WHEN = {
-    "minutes": {"type": "integer", "description": "Minutes from now, or 0"},
+    "minutes": {"type": "number", "description": "Minutes from now (a fraction for seconds: 0.5 = 30 seconds), or 0"},
     "at": {"type": "string", "description": "24-hour HH:MM clock time, or empty"},
 }
 

@@ -137,7 +137,7 @@ All on `http://127.0.0.1:8740`; every call takes an optional `clock` (name), def
 | Call | Body / query | |
 |---|---|---|
 | `POST /notify` | `text, color, anim, sound, mode, priority, keep, flash` | Show an alert; `keep` adds it to unread, `flash` opens with the light flash |
-| `POST /pickup` | `kind` (`pickup`, `timer` or `stop`), `name`, `when` (`40m`, `1h30`, `2:30pm`, `14:30`) | |
+| `POST /pickup` | `kind` (`pickup`, `timer` or `stop`), `name`, `when` (`40m`, `30s`, `1h30`, `2:30pm`, `14:30`) | |
 | `POST /stages` | `name`, `stages` (`[["50V", 15], …]` or `[{"label", "minutes"}]`), `repeat` | Up to 24 stages |
 | `POST /voice` | `text` | A spoken sentence; returns `reply` to say back |
 | `GET /unread`, `POST /unread/clear` | `id` (none: all) | |

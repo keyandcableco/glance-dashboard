@@ -410,7 +410,8 @@ def make_app(clocks, shop_url=None):
 
     def from_haiku(name, args):
         """A Haiku tool call -> the same (path, body) shape clockvoice.parse returns."""
-        when = f"{args['minutes']}m" if args.get("minutes") else args.get("at")
+        minutes = args.get("minutes")  # a fraction for a timer in seconds
+        when = (f"{int(minutes)}m" if minutes == int(minutes) else f"{round(minutes * 60)}s") if minutes else args.get("at")
         target = {"clock": args["clock"]} if args.get("clock") else {}
         if name in ("set_timer", "add_pickup") and when:
             kind = "timer" if name == "set_timer" else "pickup"

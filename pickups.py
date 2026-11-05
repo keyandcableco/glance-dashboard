@@ -34,11 +34,13 @@ log = logging.getLogger("glanced.pickups")
 
 
 def parse_when(when, now=None):
-    """'40', '40m', '1h', '1h30', '1:30' (from now) or '2:30pm', '14:30', '3pm' (clock time) -> epoch seconds."""
+    """'40', '40m', '30s', '1h', '1h30', '1:30' (from now) or '2:30pm', '14:30', '3pm' (clock time) -> epoch seconds."""
     now = now or datetime.datetime.now()
     w = str(when).strip().lower().replace(" ", "")
     if m := re.fullmatch(r"(\d+)(?:m|min)?", w):
         return (now + datetime.timedelta(minutes=int(m[1]))).timestamp()
+    if m := re.fullmatch(r"(\d+)(?:s|secs?|seconds?)", w):  # the clock's Timer counts seconds
+        return (now + datetime.timedelta(seconds=int(m[1]))).timestamp()
     if m := re.fullmatch(r"(\d+)h(?:(\d+)m?)?", w):
         return (now + datetime.timedelta(hours=int(m[1]), minutes=int(m[2] or 0))).timestamp()
     if m := re.fullmatch(r"(\d{1,2})(?::(\d{2}))?(am|pm)?", w):
@@ -246,9 +248,15 @@ def next_stage(item, spec, now):
     return None
 
 
+def pause(clock, now):
+    """Seconds to the next check: 20, or just after the next due time if that's sooner (a 30-second timer)."""
+    dues = [i["due"] - now for i in clock.unread.items if i.get("due") and i.get("kind") in KINDS and not i.get("done")]
+    return min([20.0] + [d + 0.2 for d in dues if d > 0])
+
+
 async def watch(clock):
     while True:
-        await asyncio.sleep(20)
+        await asyncio.sleep(pause(clock, time.time()))
         await clock.refresh_ring()
         now = time.time()
         for item in list(clock.unread.items):
