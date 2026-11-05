@@ -342,8 +342,9 @@ def make_app(clocks, shop_url=None):
         return web.json_response({"ok": True})
 
     def clock_json(clock):
+        focus = getattr(clock, "focus", None)  # nudges.py: (start of the active stretch, break length), drawn by the status ring
         return {"name": clock.name, "addr": clock.addr, "connected": clock.connected,
-                "unread": len(clock.unread.items)}
+                "unread": len(clock.unread.items), "focus": {"since": focus[0], "break_s": focus[1]} if focus else None}
 
     async def status(request):
         # the top level describes the chosen (default) clock, as before; "clocks" lists them all

@@ -655,7 +655,7 @@ function mmss(sec) {
 const inQuiet = (h, a, b) => a !== b && (a < b ? h >= a && h < b : h >= a || h < b);
 
 // what the panel knows, for the drawing and the readout
-const S = { bridge: null, status: null, unread: [], settings: null, nudges: null };
+const S = { bridge: null, status: null, unread: [], settings: null, nudges: null, screens: null };
 
 // ---- the clock face, measured from photos of the real one (radius 197 = bezel edge), outside in:
 // 12 hour dots in the margin; four contiguous bands of 48 near-square cells from r 170 in to r 97.6, ring 0 outermost;
@@ -665,6 +665,8 @@ const DAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const KIND = { pickup: "Pickup", timer: "Timer", stop: "Hard stop", stages: "Staged timer" };
 const RING_FROM = { pickup: 10, timer: null, stop: 30, stages: null };  // minutes before due the ring starts, as in pickups.py
 const TIMER_COLOR = "#3ccf4e";  // the clock's Timer has no colour field; its firmware draws the countdown green
+const ITEM_PX = 3, ITEM_GAP = 1, ITEM_MAX = 12;  // statusring.py: one 3-LED segment per unread item from 12 o'clock, the oldest 12
+const ARC_STEPS = 12, FOCUS_WARN = 0.8;  // statusring.py: the active stretch on the inner ring, green then orange
 const faceLeds = RINGS.map(() => []), faceKey = RINGS.map(() => Array(48).fill("")), hourDots = [];
 let faceMatrix;
 (function buildFace() {
@@ -721,12 +723,19 @@ function drawFace(now = Date.now()) {
   const link = !!(S.bridge && S.status && S.status.connected);
   const L = RINGS.map(() => Array(48).fill(null));
   const cd = link ? countdown(now) : null;
-  if (link) {
-    const n = S.unread.length, step = 48 / Math.max(1, n), len = Math.max(1, Math.min(8, Math.floor(step) - 2));
-    S.unread.forEach((it, k) => {
-      const c = led(it.color), s = Math.round(k * step - len / 2);
-      if (c) for (let j = 0; j < len; j++) L[0][(s + j + 48) % 48] = [c, 1];
+  if (link && !(S.screens && S.screens.status && !S.screens.status.on)) {  // as statusring.picture() draws it
+    S.unread.slice(0, ITEM_MAX).forEach((it, k) => {
+      const c = led(it.color || "Lime");
+      if (c) for (let j = 0; j < ITEM_PX; j++) L[0][k * (ITEM_PX + ITEM_GAP) + j] = [c, 1];
     });
+    const f = S.status.focus;
+    if (f) {
+      const share = Math.min(1, Math.max(0, (now / 1000 - f.since) / Math.max(60, f.break_s)));
+      const c = led(share >= FOCUS_WARN ? "Darkorange" : "DarkGreen");
+      for (let i = 0; i < Math.max(1, Math.floor(share * ARC_STEPS)) * 48 / ARC_STEPS; i++) L[3][i] = [c, 1];
+    }
+  }
+  if (link) {
     if (cd) {
       const lit = cd.frac * 48;
       for (let i = 0; i < Math.ceil(lit); i++) L[1][i] = L[2][i] = L[3][i] = [cd.color, i < Math.floor(lit) ? 1 : .2 + .8 * (lit % 1)];
@@ -1078,6 +1087,7 @@ const SCREENS = [
     parts: [{ a0: 60, a1: 120, c: "#00ffff" }, { a0: 150, a1: 168, c: "#b8860b" }, { a0: 200, a1: 215, c: "#ff0000" }] },
 ];
 function renderScreens(s) {  // s: what GET /screens says, or null when it can't be read
+  S.screens = s; drawFace();  // the status ring screen switched off leaves the outer ring dark
   $("screens").innerHTML = SCREENS.map(x => {
     const face = `<span class="chipled">${miniRing(x.parts)}</span>`;
     if (x.key === "time")

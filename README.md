@@ -145,7 +145,7 @@ All on `http://127.0.0.1:8740`; every call takes an optional `clock` (name), def
 | `GET/POST /settings` | `brightness, night_mode, dnd, dnd_from, dnd_till` | The clock's own settings |
 | `GET/POST /nudges` | `breaks, break_minutes, pause_minutes, closing, closing_days, snooze_minutes` | |
 | `GET/POST /screens` | `status, forecast, schedule` (each `true` or `false`) | Which screens the clock shows in turn; applied within half a minute |
-| `GET /status`, `GET /options` | | Connection, unread counts; the names of colors, sounds, icons |
+| `GET /status`, `GET /options` | | Connection, unread counts, the active stretch toward a break nudge (`focus`); the names of colors, sounds, icons |
 
 `glance.py --list` prints the colors, animations, sounds and icons (`{bell}`, `{heart}`, …). `/notify` refuses
 an unknown `{name}`; everywhere else (email subjects, calendar titles, names) it's shown as plain text.
