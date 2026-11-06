@@ -776,7 +776,8 @@ def make_app(clocks, shop_url=None):
         return web.json_response(cals.json())
 
     async def get_message(request):
-        return web.json_response(pick(request).message.json())
+        clock = pick(request)
+        return web.json_response(clock.message.json(ringwords.soon(clock, time.time())))
 
     async def set_message(request):
         """{"top", "bottom", "top_color", "bottom_color", "minutes"}: words for the words screen, in place of
@@ -791,7 +792,7 @@ def make_app(clocks, shop_url=None):
                 clock.message.show(**{k: body[k] for k in ("top", "bottom", "top_color", "bottom_color", "minutes") if k in body})
         except ValueError as e:
             return web.json_response({"error": str(e)}, status=400)
-        return web.json_response(clock.message.json())
+        return web.json_response(clock.message.json(ringwords.soon(clock, time.time())))
 
     async def options(request):
         from glance import ICONS

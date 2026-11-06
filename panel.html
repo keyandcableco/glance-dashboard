@@ -513,7 +513,7 @@
           <button class="btn" id="rwClear" disabled>Clear</button>
           <button class="btn primary" id="rwShow">Show</button>
         </div>
-        <p class="hint">One of the screens in turn, about 15 seconds each time it comes round, with the time and date under it. What you type shows instead of the words source&rsquo;s until the time&rsquo;s up or you clear it; with neither, the screen sits out. Letters, digits, spaces and &amp; ! ? - : *, and &lt;3 for a heart. About 6 letters fit on each half; longer lines run down the sides and read sideways.</p>
+        <p class="hint">One of the screens in turn, about 15 seconds each time it comes round, with the time and date under it. What you type shows until the time&rsquo;s up or you clear it; otherwise a pickup or hard stop due within the hour, otherwise the words source&rsquo;s. With nothing to say, the screen sits out. Letters, digits, spaces and &amp; ! ? - : *, and &lt;3 for a heart. About 6 letters fit on each half; longer lines run down the sides and read sideways.</p>
       </section>
     </div>
 
@@ -1213,7 +1213,7 @@ const SCREENS = [
     parts: [{ a0: 0, a1: 60, c: "#ff0000" }, { a0: 60, a1: 120, c: "#ff8c00" }, { a0: 120, a1: 180, c: "#00ff00" }, { a0: 180, a1: 240, c: "#00ffff" }, { a0: 240, a1: 300, c: "#4169e1" }, { a0: 300, a1: 360, c: "#8a2be2" }] },
   { key: "claude", name: "Claude", d: "A face for the Claude Code sessions: dizzy and red when a turn died, wide-eyed when one waits on you, smiling when one finished, looking around while they work; a pip at 12 o'clock for each one that needs you.", setup: "a [claude_face] section",
     parts: [{ a0: -55, a1: -35, c: "#ff8c00" }, { a0: 35, a1: 55, c: "#ff8c00" }, { a0: 135, a1: 225, c: "#ff8c00" }, { a0: -8, a1: 8, c: "#ff8c00" }] },
-  { key: "words", name: "Words", d: "Two lines in letters round the rings: what you type under Words on the rings, else what the words source says; out of the turn when there's nothing.",
+  { key: "words", name: "Words", d: "Two lines in letters round the rings: what you type under Words on the rings, else a pickup or hard stop due within the hour, else what the words source says; out of the turn when there's nothing.",
     parts: [{ a0: -40, a1: 40, c: "#00ffff" }, { a0: 145, a1: 215, c: "#ff8c00" }] },
 ];
 function renderScreens(s) {  // s: what GET /screens says, or null when it can't be read
@@ -1329,7 +1329,7 @@ function rwLayout(top, bottom, topColor, bottomColor) {  // {grid, error, sidewa
 const rwSet = ledSetter(ringCells($("rwLeds")));
 $("rwTopColor").innerHTML = $("rwBottomColor").innerHTML = RW_COLORS.map(([v, label]) => `<option value="${v}">${label}</option>`).join("");
 $("rwTopColor").value = "Aqua"; $("rwBottomColor").value = "Darkorange";
-const rwNow = m => m && (m.typed || m.said) || null;  // what the words screen says now: typed words first
+const rwNow = m => m && (m.typed || m.soon || m.said) || null;  // what the words screen says now: typed, a pickup or stop due soon, the source
 const rwOff = () => !!(S.screens && S.screens.words && !S.screens.words.on);
 function rwPreview() {  // what's typed, else what the screen says now, else the placeholder (dim)
   const top = rwTidy($("rwTop").value), bottom = rwTidy($("rwBottom").value), typing = !!(top || bottom), now = !typing && rwNow(S.message);
@@ -1348,10 +1348,11 @@ function rwPreview() {  // what's typed, else what the screen says now, else the
 }
 function renderMessage(m) {  // what GET /message says, or null when it can't be read
   S.message = m;
-  const t = m && m.typed, said = m && m.said, off = rwOff() ? " · the Words screen is off" : "";
-  $("rwLed").className = "cled " + (!m ? "" : off || (!t && m.error) ? "warn" : t || said ? "on" : "");
+  const t = m && m.typed, soon = m && m.soon, said = m && m.said, off = rwOff() ? " · the Words screen is off" : "";
+  $("rwLed").className = "cled " + (!m ? "" : off || (!t && m.error) ? "warn" : t || soon || said ? "on" : "");
   $("rwState").textContent = (!m ? "Unknown: the bridge isn't answering"
     : t ? `Typed: ${rwWords(t)} · ${t.until ? "until " + clockTime(t.until) : "until cleared"}`
+    : soon ? `Due soon: ${rwWords(soon)}${m.error ? " · the words source's last run failed: " + m.error : ""}`
     : said ? `From the words source: ${rwWords(said)}${m.error ? " · its last run failed: " + m.error : ""}`
     : m.error ? `The words source failed: ${m.error}`
     : m.source ? "The words source has nothing to say, so the screen sits out" : "Nothing to say, so the screen sits out") + (m ? off : "");
@@ -1385,7 +1386,7 @@ $("rwClear").onclick = async () => {
   try {
     const m = await api("/message", { clear: true });
     if (CLOCK === asked) renderMessage(m);
-    toast(m.said ? `Cleared; back to the words source: ${rwWords(m.said)}` : "Cleared");
+    toast(m.soon || m.said ? `Cleared; back to ${rwWords(m.soon || m.said)}` : "Cleared");
   } catch (e) { toast("Not cleared: " + e.message, true); loadMessage(); }
 };
 

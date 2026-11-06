@@ -1,5 +1,6 @@
 """Words on the rings: two lines drawn in letters round the clock's four rings, one more screen in the
-turn. They say what was typed on the panel while it lasts, else what the clock's words source says.
+turn. They say what was typed on the panel while it lasts, else the next pickup or hard stop due within
+the hour, else what the clock's words source says.
 
 The 4 rings of 48 LEDs make a display 4 lights tall and 48 wide that wraps round the dial. The font is
 3×4 (capitals, digits, & ! ? - : *, and <3 for a heart), with a blank column between letters. The top
@@ -11,9 +12,11 @@ seen on the shop clock (2026-11-05).
 
 It's a saved scene in watch-face mode in SLOT, kept drawn by statusring.watch like the other screens
 (never during an alert or a countdown's alarm), and switched on and off on the panel as the "words"
-screen; with nothing to say it leaves the turn (its slot deleted). Typed words and their end are kept in
-message-<name>.json. Until 2026-11-06 typed words took the whole face at once (mode 0, priority 40);
-now they take their turn like the other screens, and a source keeps the screen saying something useful.
+screen; with nothing to say it leaves the turn (its slot deleted). Typed words come first, then the
+next pickup or hard stop when one is due within the hour (JUNO / 3:30), then the words source's. Typed
+words and their end are kept in message-<name>.json. Until 2026-11-06 typed words took the whole face at
+once (mode 0, priority 40); now they take their turn like the other screens, and a source keeps the
+screen saying something useful.
 
 The words source, set per clock in config.toml ([clocks.<name>.words] command = "..."), is a command run
 every every_minutes: the first line it prints is the top line and the second the bottom, or one line
@@ -34,6 +37,7 @@ import time
 import unicodedata
 from pathlib import Path
 
+import pickups
 import statusring
 from glance import FOLD, pb
 
@@ -50,6 +54,8 @@ EVERY_MINUTES = 5
 RUN_S = 30  # a words command that takes longer is stopped
 STALE_S = 60 * 60
 RETRY_S = 60  # after a failed run, say before the network is up
+SOON_KINDS = ("pickup", "stop")
+SOON_S, LATE_S = 60 * 60, 15 * 60  # these take the words from an hour before they're due to 15 minutes after
 
 FONT = {
     "A": [".#.", "#.#", "###", "#.#"], "B": ["##.", "###", "#.#", "###"], "C": [".##", "#..", "#..", ".##"],
@@ -282,27 +288,46 @@ class Message:
         self._save(None)
         log.info("%s: typed words on the rings cleared", self.name)
 
-    def words(self, now):
-        """(top, bottom, top colour, bottom colour) to show now, or ()."""
+    def words(self, now, soon=None):
+        """(top, bottom, top colour, bottom colour) to show now, or (): typed words, else soon (the next
+        pickup or hard stop, from soon()), else the words source's."""
         t = self.typed
         if t and t["until"] and now >= t["until"]:
             self._save(None)
             log.info("%s: typed words on the rings ended", self.name)
         elif t:
             return t["top"], t["bottom"], t["top_color"], t["bottom_color"]
+        if soon:
+            return (*soon, *self.colors)
         s = self.said
         return (s["top"], s["bottom"], *self.colors) if s and now - s["at"] < self.stale_s else ()
 
-    def json(self):
+    def json(self, soon=None):
         now = time.time()
         self.words(now)  # an ended one goes
+        colors = {"top_color": self.colors[0], "bottom_color": self.colors[1]}
         fresh = self.said and now - self.said["at"] < self.stale_s
-        return {"typed": self.typed, "said": {**self.said, "top_color": self.colors[0], "bottom_color": self.colors[1]} if fresh else None,
-                "source": self.source, "error": self.error}
+        return {"typed": self.typed, "soon": {"top": soon[0], "bottom": soon[1], **colors} if soon else None,
+                "said": {**self.said, **colors} if fresh else None, "source": self.source, "error": self.error}
+
+
+def soon(clock, now):
+    """(name, time) for the next pickup or hard stop on the list due within SOON_S, or up to LATE_S
+    late (one still to come first), or None: JUNO / 3:30, or PICKUP / 3:30 without a name. A name cut to
+    fit loses a dangling - & or : ("Sam - Juno" is SAM)."""
+    near = [i for i in clock.unread.items if i.get("kind") in SOON_KINDS and isinstance(i.get("due"), (int, float))
+            and -LATE_S <= i["due"] - now <= SOON_S]
+    if not near:
+        return None
+    item = min(near, key=lambda i: (i["due"] < now, i["due"]))
+    words = fill(plain(item.get("name")).split())[0].split()
+    while words and not words[-1].strip("-&:"):
+        words.pop()
+    return " ".join(words) or pickups.KINDS[item["kind"]]["label"], pickups.clock_time(item["due"])
 
 
 def picture(clock, now):
-    return clock.message.words(now)
+    return clock.message.words(now, soon(clock, now))
 
 
 def watch(clock):
