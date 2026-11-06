@@ -40,13 +40,16 @@ import screens
 import screensaver
 import textwatch
 import unread
-from glance import CHAR, NOTIFY, PRIORITIES, build_notice
+from glance import CHAR, NOTIFY, PRIORITIES, build_notice, clock_text, enum_value
 import glance_pb2 as pb  # on sys.path via glance
 
 PANEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "panel.html")
 SETTINGS_CMD = bytes([5, 0, 0, 0])
 TIMER, TIMER_STOP = 3, 10
 FLASH_S = 3.5  # the light flash runs 3 s; its scene is deleted after
+SOUND = 45  # [45, 0, 0, n] plays the clock's sound n, [45, 0, 0, 0] stops it
+SOUND_S = 5  # a played sound is stopped after this, since not every sound may end by itself
+RESYNC_AT, RESYNC_BY = datetime.time(3, 30), datetime.time(6)  # nightly, after a 2 am daylight-saving change
 PASSWORD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "panel_password")
 LOCAL = ("127.0.0.1", "::1")
 CTS_SERVICE = "00001805-0000-1000-8000-00805f9b34fb"
@@ -126,13 +129,16 @@ class Clock:
         self.last_alert = 0.0  # when an alert or countdown was last sent (the screens wait after it)
         self.events = []  # calendar events (uid, start, title, end) in the next 24 h, from calwatch
         self.flashing = asyncio.Lock()  # one flash and its notice at a time: flashes share one slot
+        self.sound_stop = None  # the task that stops a played sound
+        self.sounding = asyncio.Lock()  # one play or stop at a time, so a stop never cuts the next sound short
+        self.linked_at = None  # when the link was made: the clock read the time then
 
     async def countdown(self, due, owner, text):
         """Ask for a ring countdown to `due` for unread item `owner`. The clock has one ring
         timer, so refresh_ring decides who has it (a running staged timer, else the soonest)."""
         for item in self.unread.items:
             if item["id"] == owner:
-                item.update(ring_due=due, ring_text=text[:24] or "TIME")
+                item.update(ring_due=due, ring_text=clock_text(text)[:24] or "TIME")
         self.unread._save()
         await self.refresh_ring()
 
@@ -194,6 +200,7 @@ class Clock:
                 self.client = BleakClient(self.addr, disconnected_callback=lambda _: self.lost.set())
                 await self.client.connect()
                 log.info("%s: connected to %s", self.name, self.addr)
+                self.linked_at = datetime.datetime.now()
                 with contextlib.suppress(Exception):  # a flash cut off by a lost link would keep strobing
                     await self.write(bytes([statusring.SCENES_DELETE, 0, 0, statusring.FLASH_SLOT]))
                 await self.lost.wait()
@@ -201,6 +208,24 @@ class Clock:
             except Exception as e:  # BLE errors come in many types; just retry
                 log.warning("%s: connect failed: %s", self.name, e)
             await asyncio.sleep(5)
+
+    async def resync(self):
+        """Once a night drop the link so the clock reconnects and reads the time again: it reads it only
+        on a fresh connection, and the link can stay up for weeks, through a daylight-saving change."""
+        while True:
+            await asyncio.sleep(60)
+            now = datetime.datetime.now()
+            due = datetime.datetime.combine(now.date(), RESYNC_AT)
+            if not RESYNC_AT <= now.time() < RESYNC_BY or not self.connected or (self.linked_at or now) >= due:
+                continue
+            if statusring.busy(self, time.time()) or statusring.counting_down(self, time.time()):
+                continue  # a countdown might not survive the drop: wait for it to end
+            log.info("%s: dropping the link so the clock reads the time again", self.name)
+            try:
+                await asyncio.wait_for(self.client.disconnect(), 30)
+            except Exception as e:
+                log.warning("%s: dropping the link failed: %s", self.name, str(e) or type(e).__name__)
+                self.linked_at = now  # not again tonight
 
     @staticmethod
     def notice(text, color="Lime", anim="Pulse", sound="Radar", mode="Repeat", priority="high", strict=False):
@@ -236,6 +261,26 @@ class Clock:
 
     async def notify(self, flash=False, **fields):
         await self.show(self.notice(**fields), flash)  # bad names fail before anything is sent
+
+    async def play(self, sound):
+        """Play one of the clock's sounds by name (NoneSound stops it) and stop it after SOUND_S."""
+        n = enum_value(pb.Sound, sound)  # ValueError on a bad name, before anything is sent
+        async with self.sounding:
+            if self.sound_stop:
+                self.sound_stop.cancel()
+                self.sound_stop = None
+            await self.write(bytes([SOUND, 0, 0, n]))
+            if n:
+                self.sound_stop = asyncio.create_task(self.stop_sound())
+
+    async def stop_sound(self):
+        await asyncio.sleep(SOUND_S)
+        async with self.sounding:  # a play that got the lock first has cancelled this task
+            self.sound_stop = None
+            try:
+                await self.write(bytes([SOUND, 0, 0, 0]))
+            except Exception as e:
+                log.warning("%s: stopping the sound failed: %s", self.name, e)
 
     async def read_settings(self):
         if not self.connected:
@@ -358,6 +403,18 @@ def make_app(clocks, shop_url=None):
             return web.json_response({"error": str(e)}, status=503)
         log.info("%s: notify: %s", clock.name, fields)
         return web.json_response({"ok": True})
+
+    async def play_sound(request):
+        """{"sound": a name from /options}: play it on the clock for a few seconds; NoneSound stops it."""
+        body = await read_body(request)
+        clock = pick(request, body)
+        try:
+            await clock.play(str(body.get("sound", "")))
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=503)
+        return web.json_response({"ok": True, "seconds": SOUND_S})
 
     def clock_json(clock):
         focus = getattr(clock, "focus", None)  # nudges.py: (start of the active stretch, break length), drawn by the status ring
@@ -749,7 +806,7 @@ def make_app(clocks, shop_url=None):
         return web.FileResponse(PANEL)
 
     app = web.Application(middlewares=[password_check()])
-    app.add_routes([web.post("/notify", notify), web.get("/status", status),
+    app.add_routes([web.post("/notify", notify), web.post("/sound", play_sound), web.get("/status", status),
                     web.get("/unread", list_unread), web.post("/unread/clear", clear_unread),
                     web.get("/settings", get_settings), web.post("/settings", set_settings),
                     web.get("/options", options), web.post("/pickup", add_pickup), web.post("/stages", add_stages), web.post("/voice", voice), web.get("/nudges", get_nudges), web.get("/notes", list_notes), web.post("/notes", change_note), web.post("/nudges", set_nudges), web.get("/screens", get_screens), web.post("/screens", set_screens), web.get("/calendars", get_calendars), web.post("/calendars", set_calendars), web.get("/message", get_message), web.post("/message", set_message), web.get("/", panel)])
@@ -778,7 +835,7 @@ async def main():
         clock.screens = screens.Screens(name, c)
         clock.calendars = calendars.Calendars(name, c)
         clock.message = ringwords.Message(name)
-        watchers = {"connection": clock.keep_connected, "replay": lambda clock=clock: unread.replay(clock),
+        watchers = {"connection": clock.keep_connected, "resync": clock.resync, "replay": lambda clock=clock: unread.replay(clock),
                     "pickups": lambda clock=clock: pickups.watch(clock), "nudges": lambda clock=clock: nudges.watch(clock),
                     "ring": lambda clock=clock: statusring.watch(clock), "schedule": lambda clock=clock: schedulering.watch(clock),
                     "animation": lambda clock=clock: animscreen.watch(clock),

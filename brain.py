@@ -57,7 +57,7 @@ def tools(clock_names):
              "('50V 15 min, then 75V, 100V, 120V'), glue-ups ('clamp 45 then unclamp'), burn-in, lacquer coats, "
              "or focus rhythms ('focus 25' = WORK 25 / BREAK 5, 4 rounds). Labels are what the clock "
              "shows during each stage: short, capitals. Put ONE round in stages and the number of rounds in "
-             "repeat; never write the rounds out. Whole minutes; at most 24 stages and 24 hours in all.",
+             "repeat; never write the rounds out. Whole minutes; at most 20 stages and 24 hours in all.",
              {"name": {"type": "string", "description": "What it's for, e.g. CAPS or FOCUS"},
               "stages": {"type": "array", "minItems": 1, "description": "One round of stages, in order",
                          "items": {"type": "object", "additionalProperties": False, "required": ["label", "minutes"],

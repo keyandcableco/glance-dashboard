@@ -167,6 +167,11 @@
   .sel::after { content: ""; position: absolute; right: 17px; top: 50%; width: 7px; height: 7px; border: solid var(--ink-2);
                 border-width: 0 1.5px 1.5px 0; transform: translateY(-70%) rotate(45deg); pointer-events: none; }
   .sel.sw select { padding-left: 42px; }
+  .fields.look { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }  /* room for a sound name beside its play button */
+  .selplay { display: flex; gap: 8px; }
+  .selplay .sel { flex: 1; min-width: 0; }
+  .btn.play { min-height: 46px; width: 46px; padding: 0; flex: none; }
+  .btn.play.on { background: var(--ink); border-color: var(--ink); color: var(--page); }
   .sel.sw i { position: absolute; left: 13px; top: 50%; width: 18px; height: 18px; margin-top: -9px; border-radius: 50%;
               background: var(--glass); box-shadow: inset 0 0 0 4px var(--glass), inset 0 0 0 10px var(--c, transparent); pointer-events: none; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 18px; }
@@ -456,10 +461,10 @@
         </div>
         <label class="field">Text <span class="unit"><input type="text" id="text" maxlength="40" placeholder="{bell} BACK IN 5" autocomplete="off"><i id="textCount" aria-hidden="true">0/40</i></span></label>
         <div class="icons" id="icons" role="group" aria-label="Insert an icon"></div>
-        <div class="fields" style="margin-top:14px">
+        <div class="fields look" style="margin-top:14px">
           <label class="field">Color <span class="sel sw"><i id="colorSw"></i><select id="color"></select></span></label>
           <label class="field">Animation <span class="sel"><select id="anim"></select></span></label>
-          <label class="field">Sound <span class="sel"><select id="sound"></select></span></label>
+          <div class="field">Sound <span class="selplay"><span class="sel"><select id="sound" aria-label="Sound"></select></span><button type="button" class="btn play" id="soundPlay" aria-label="Play this sound on the clock" title="Play on the clock" disabled></button></span></div>
           <label class="field">Priority <span class="sel"><select id="priority"></select></span></label>
         </div>
         <div class="field" style="margin-top:14px">Text mode
@@ -478,7 +483,7 @@
           <span class="grow"></span>
           <button class="btn primary" id="send">Send</button>
         </div>
-        <p class="hint">The light flash runs all four rings red and white for 3 seconds before the text, as for anything due now. Text mode only applies to text that fits in one piece (about 30 characters); longer text shows each piece once.</p>
+        <p class="hint">The light flash runs all four rings red and white for 3 seconds before the text, as for anything due now. Text mode only applies to text that fits in one piece (about 30 characters); longer text shows each piece once. The play button beside Sound plays it on the clock itself for a few seconds.</p>
       </section>
 
       <section class="panel" id="secWords" aria-labelledby="hWords">
@@ -577,6 +582,20 @@ const FONT = {};
  "\\0204081020|^0402010204|`0001020400|{0008364100|}0041360800|~1008081008")
   .split("|").forEach(g => FONT[g[0]] = g.slice(1).match(/../g).map(h => parseInt(h, 16)));
 FONT["|"] = [0, 0, 127, 0, 0];
+Object.assign(FONT, { "°": [6, 9, 9, 6], "é": [56, 84, 86, 85, 24], "€": [20, 62, 85, 85, 65], "¢": [24, 36, 126, 36], "£": [72, 126, 73, 65, 66] });
+// what the clock can show, as glance.clock_text: ASCII, the Latin-1 letters, ° € ¢ £, plain letters for the rest
+const FOLD = { "‘": "'", "’": "'", "‚": "'", "′": "'", "“": '"', "”": '"', "„": '"', "″": '"', "‐": "-", "‑": "-", "‒": "-",
+  "–": "-", "—": "-", "―": "-", "−": "-", "…": "...", "×": "x", "œ": "oe", "Œ": "OE", "ł": "l", "Ł": "L", "đ": "d", "Đ": "D", "ı": "i", "µ": "u", "μ": "u",
+  "Ω": "ohm", "℃": "°C", "℉": "°F", "º": "°", "•": "*", "·": "-", "«": '"', "»": '"', "‹": "'",
+  "›": "'", "→": "->", "←": "<-", "±": "+/-", "≤": "<=", "≥": ">=", "≠": "!=", "÷": "/" };
+function clockChar(c) {
+  if (c >= " " && c <= "~" || "°€¢£".includes(c) || c >= "\u00c0" && c <= "\u00ff" && c !== "×" && c !== "÷") return c;
+  if (FOLD[c]) return FOLD[c];
+  if (/[\p{C}\p{M}\p{Z}\p{So}\p{Sk}]/u.test(c)) return "";  // emoji, symbols, stray accents, invisible and control characters
+  const plain = c.normalize("NFKD").replace(/\u2044/g, "/").replace(/[^ -~]/g, "");
+  return plain.includes("/") ? ` ${plain} ` : plain || "?";  // 1½ is 1 1/2
+}
+const clockText = s => [...String(s).split(/[\s\x1c-\x1f]+/).join(" ").normalize("NFC")].map(clockChar).join("").split(/\s+/).filter(Boolean).join(" ");
 // the built-in icons, drawn to match their names (the clock's own bitmaps aren't known)
 const ICON = {
   house: [8, 124, 126, 15, 126, 124, 8], phone: [4, 54, 58, 58, 58, 54, 4], clock: [28, 34, 65, 77, 73, 34, 28],
@@ -593,16 +612,18 @@ const isIcon = name => Object.hasOwn(ICON, name.toLowerCase());
 
 function glyph(ch) {
   if (ch === " ") return [0, 0];
-  const g = FONT[ch] || FONT[ch.toUpperCase()] || FONT["?"];
+  // an accented letter is drawn as its plain one here (the clock has its own accented glyphs)
+  const plain = { ß: "B", æ: "a", Æ: "A", ø: "o", Ø: "O", ð: "d", Ð: "D", þ: "p", Þ: "P" }[ch] || ch.normalize("NFD")[0];
+  const g = FONT[ch] || FONT[plain] || FONT[ch.toUpperCase()] || FONT["?"];
   let a = 0, b = g.length;
   while (a < b && !g[a]) a++;
   while (b > a && !g[b - 1]) b--;
   return g.slice(a, b);
 }
 
-function textCols(s) {  // text with {icon} names -> matrix columns
+function textCols(s) {  // text with {icon} names -> matrix columns, as the clock will show it
   const cols = [];
-  for (const part of String(s).split(/(\{\w+\})/)) {
+  for (const part of clockText(s).split(/(\{\w+\})/)) {
     const m = part.match(/^\{(\w+)\}$/);
     for (const g of m && isIcon(m[1]) ? [ICON[m[1].toLowerCase()]] : [...part].map(glyph)) {
       if (cols.length) cols.push(0);
@@ -957,7 +978,7 @@ async function loadOptions() {
   try {
     const o = await api("/options");
     fill($("color"), o.colors, "Lime"); fill($("anim"), o.animations, "Pulse");
-    fill($("sound"), o.sounds, "NoneSound"); fill($("priority"), o.priorities, "high");
+    fill($("sound"), o.sounds, "NoneSound"); fill($("priority"), o.priorities, "high"); soundButton(false);
     $("icons").innerHTML = o.icons.map(i => `<button type="button" class="ichip" data-icon="${esc(i)}" title="Insert {${esc(i)}}">${dmSVG(`{${i}}`, 1.75, .78)}<span>${esc(i)}</span></button>`).join("");
     looks();
     RW_FONT = o.ring_font || null; rwPreview(); drawFace();
@@ -1023,6 +1044,33 @@ $("flash").addEventListener("change", () => {  // play the flash once on the pre
   $("prevRing").setAttribute("class", "pring flash");
 });
 $("prevRing").addEventListener("animationend", e => { if (e.animationName === "flash") looks(); });
+
+// the play button beside Sound: the clock plays it, and the bridge stops it after a few seconds
+const PLAY = '<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M3 1.5v9l7.5-4.5z" fill="currentColor"/></svg>';
+const STOP = '<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="2" y="2" width="8" height="8" rx="1" fill="currentColor"/></svg>';
+let soundEnds = 0;
+function soundButton(playing) {
+  const b = $("soundPlay");
+  clearTimeout(soundEnds);
+  b.innerHTML = playing ? STOP : PLAY;
+  b.classList.toggle("on", playing);
+  b.setAttribute("aria-label", playing ? "Stop the sound" : "Play this sound on the clock");
+  b.title = playing ? "Stop" : "Play on the clock";
+  b.disabled = !playing && $("sound").value === "NoneSound";
+}
+$("soundPlay").onclick = async () => {
+  const playing = $("soundPlay").classList.contains("on");
+  try {
+    const r = await api("/sound", { sound: playing ? "NoneSound" : $("sound").value });
+    soundButton(!playing);
+    if (!playing) soundEnds = setTimeout(() => soundButton(false), (r.seconds || 5) * 1000);
+  } catch (e) { soundButton(false); toast("Didn't play: " + e.message, true); }
+};
+$("sound").addEventListener("change", () => {
+  if ($("soundPlay").classList.contains("on")) api("/sound", { sound: "NoneSound" }).catch(() => {});
+  soundButton(false);
+});
+soundButton(false);
 
 $("send").onclick = async () => {
   const text = $("text").value.trim(); if (!text) return toast("Type some text first", true);

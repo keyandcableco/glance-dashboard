@@ -14,7 +14,7 @@ import math
 import re
 import time
 
-from glance import encode_text, pb
+from glance import clock_text, encode_text, pb
 
 KINDS = {
     "pickup": {"label": "PICKUP", "look": {"color": "DarkGoldenRod", "anim": "Wheel"}, "warn": (10,), "ring_from": 10},
@@ -24,7 +24,7 @@ KINDS = {
     # a run of labelled stages on one native timer: cap reforming, glue-ups, burn-in, bench/admin rhythm
     "stages": {"label": "STAGES", "look": {"color": "Turquoise", "anim": "Wheel"}, "warn": (), "ring_from": None},
 }
-MAX_STAGES = 24
+MAX_STAGES = 20  # the clock refuses a Timer with more intervals (0x87, firmware 1.6.7)
 MAX_STAGE_S = MAX_RUN_S = 24 * 3600
 MAX_TIMER_BYTES = 500  # one Bluetooth write carries at most 512
 ALERT = {"sound": "Rise", "priority": "critical"}
@@ -135,8 +135,8 @@ def timer_payload(stages, final_text):
     for label, seconds in stages:
         interval = timer.intervals.add(duration=int(seconds))
         if label:
-            interval.text.add(text=encode_text(label[:24]))
-    timer.finalText.add(text=encode_text(final_text[:24] or "TIME"))
+            interval.text.add(text=encode_text(clock_text(label)[:24]))
+    timer.finalText.add(text=encode_text(clock_text(final_text)[:24] or "TIME"))
     return bytes([3, 0, 0, 0]) + timer.SerializeToString()
 
 
@@ -152,7 +152,7 @@ def clean_stages(stages, name):
             continue  # a zero-length stage is left out
         if seconds > MAX_STAGE_S:
             raise ValueError("a stage can be 24 hours at most")
-        out.append((str(label).upper()[:24] or f"STEP {n}", seconds))
+        out.append((clock_text(label).upper()[:24] or f"STEP {n}", seconds))
     if not out:
         raise ValueError("no stages with a length")
     if len(out) > MAX_STAGES:

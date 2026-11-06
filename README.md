@@ -16,7 +16,9 @@ of his `Glance.proto`, fixed so `protoc` accepts it. Everything here builds on t
 ## What it does
 
 - **Alerts** on the 32×8 display and the four 48-LED rings: text, built-in icons, color, animation, sound,
-  priority. Long text is split into pieces the clock shows in turn.
+  priority. Long text is split into pieces the clock shows in turn. The clock reads text as UTF-8 and draws
+  ASCII, every Latin-1 letter (À-ÿ), ° € ¢ £ and its icons; other letters lose their accents (ł as l),
+  curly quotes and dashes go as straight ones, and emoji are left out. The panel's play button plays a sound on the clock.
 - **Sources**, per clock: new emails in a Thunderbird inbox matching subject rules; desktop notifications
   from chosen people (e.g. texts via Google Messages for Web); Google Calendar events (15 min, 5 min, now)
   from any number of calendars, added and removed on the panel; anything that can `curl` (a Claude Code
@@ -31,7 +33,7 @@ of his `Glance.proto`, fixed so `protoc` accepts it. Everything here builds on t
 - **Staged timers** on the clock's own multi-interval timer: each stage counts down on the ring with its
   label on the text line. Cap reforming ("50V 15 → 75V 15 → 100V 15 → 120V 15"), glue-ups, burn-in,
   lacquer coats, or focus rhythms ("hey glance, focus" = WORK 25 / BREAK 5, four rounds ending on WORK).
-  Presets on the panel. Up to 24 stages and 24 hours; labels up to 24 characters. A running staged timer
+  Presets on the panel. Up to 20 stages and 24 hours; labels up to 24 characters. A running staged timer
   takes the ring ahead of other countdowns (their alerts still fire), alerts once at the end, and can be
   renamed or cancelled but not moved.
 - **Forecast graph**: the next 24 hours of humidity, temperature or chance of rain drawn around the ring
@@ -162,7 +164,7 @@ All on `http://127.0.0.1:8740`; every call takes an optional `clock` (name), def
 |---|---|---|
 | `POST /notify` | `text, color, anim, sound, mode, priority, keep, flash` | Show an alert; `keep` adds it to unread, `flash` opens with the light flash |
 | `POST /pickup` | `kind` (`pickup`, `timer` or `stop`), `name`, `when` (`40m`, `30s`, `1h30`, `2:30pm`, `14:30`) | |
-| `POST /stages` | `name`, `stages` (`[["50V", 15], …]` or `[{"label", "minutes"}]`), `repeat` | Up to 24 stages |
+| `POST /stages` | `name`, `stages` (`[["50V", 15], …]` or `[{"label", "minutes"}]`), `repeat` | Up to 20 stages |
 | `POST /voice` | `text` | A spoken sentence; returns `reply` to say back |
 | `GET /unread`, `POST /unread/clear` | `id` (none: all) | |
 | `GET/POST /notes` | `text` to add; `id` with `done` or `delete` | |
@@ -171,6 +173,7 @@ All on `http://127.0.0.1:8740`; every call takes an optional `clock` (name), def
 | `GET/POST /calendars` | `add: {name, url}` (a secret iCal address, checked by reading it once) or `remove: id` | A clock's calendars by name and host; the addresses stay in `calendars-<name>.json` (mode 0600) and are never sent back |
 | `GET/POST /message` | `top, bottom, top_color, bottom_color, minutes` (default 5; 0: until cleared), or `clear: true` | Words on the rings, taking the whole face now; up to 16 characters a line |
 | `GET/POST /screens` | `status, forecast, schedule, animation, screensaver` (each `true` or `false`) | Which screens the clock shows in turn; applied within half a minute |
+| `POST /sound` | `sound` (a name; `NoneSound` stops it) | Play one of the clock's sounds; the bridge stops it after 5 s |
 | `GET /status`, `GET /options` | | Connection, unread counts, the active stretch toward a break nudge (`focus`); the names of colors, sounds, icons |
 
 `glance.py --list` prints the colors, animations, sounds and icons (`{bell}`, `{heart}`, …). `/notify` refuses
@@ -203,7 +206,8 @@ The full reference, with every command, error code and setting found so far, is 
 - **Light flash**: a CustomScene with a Fill and an `AreaAnimation` of type `LightFlash` over the same
   area (`flashLight.color`, `speed`). Like any scene it's saved and keeps cycling, so delete its slot
   after it has played.
-- The clock reads the Current Time Service from the central when it connects.
+- The clock reads the Current Time Service from the central when it connects, and only then, so the
+  bridge drops its link once a night (3:30, after a daylight-saving change) and reconnects to set the time.
 - A short-lived second BLE client to the same clock (a one-off script like `set_setting.py`) drops the
   bridge's link when it disconnects; the bridge reconnects within seconds.
 

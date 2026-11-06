@@ -21,7 +21,7 @@ import datetime
 import struct
 
 import statusring
-from glance import encode_text, pb
+from glance import clock_text, encode_text, pb
 
 SLOT = 7
 APPOINTMENTS = 8
@@ -69,7 +69,7 @@ def scene_bytes(want):
         for start, minutes, height, kind, name in blocks:
             r, g, b = COLORS[kind]
             data += struct.pack("<I", start | min(minutes, 2047) << 11 | NO_REMINDER << 22) + bytes([b, g, r, height])
-            scene.appointmentNames.add(text=encode_text(name[:NAME_CHARS]))
+            scene.appointmentNames.add(text=encode_text(clock_text(name)[:NAME_CHARS]))
         scene.appointmentData = data
         out = bytes([APPOINTMENTS, 0, statusring.MODE_WATCHFACE, SLOT]) + scene.SerializeToString()
         if len(out) <= MAX_BYTES or len(blocks) == 1:

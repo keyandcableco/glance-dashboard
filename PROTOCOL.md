@@ -52,7 +52,7 @@ the standard "Prepare Queue Full" error (seen). A command the clock refuses come
 | 7 | 0x87 | too many (seen: over 24 appointments, over 20 timer intervals; expected: 20 saved scenes, 5 alarms, 5 field-4 calendar alerts) |
 | 8 | 0x88 | busy, or not allowed right now (expected) |
 
-A Timer on the clock takes at most 20 intervals: 21 was refused (0x87), 20 accepted (seen). This repo's staged timers still allow 24 (README, `pickups.py`); that is being fixed.
+A Timer on the clock takes at most 20 intervals: 21 was refused (0x87), 20 accepted (seen). This repo's staged timers allow 20.
 
 ## Commands
 
@@ -196,8 +196,9 @@ The text line decodes **UTF-8** (seen, from notices of four bytes each):
   crossed out, thermometer, drop, heart, barometer, `|<`, `>|`, umbrella, bell, speaker, wind, cloud.
   0xA2 shows ¢, 0xA3 £ and 0xB0 ° (Hypfer's 176). The rest of 0x9A-0xBF show `?`.
 - Sequences: `C2 B0` shows °, `C3 A9` é, `E2 82 AC` € and `C3 C4` Ä (the decoder doesn't check that the
-  second byte is a proper continuation byte). Other two- and three-byte sequences tried showed one `?`
-  each; valid four-byte ones weren't tried. An unfinished sequence at the end of the text is dropped, and
+  second byte is a proper continuation byte). Every Latin-1 letter U+00C0-00FF (× and ÷ not tried) sent
+  as proper UTF-8 (`C3 80`-`C3 BF`) drew as its own accented glyph (seen, 2026-11-05 21:35, five letters a
+  notice). Other two- and three-byte sequences tried showed one `?` each; valid four-byte ones weren't tried. An unfinished sequence at the end of the text is dropped, and
   0xFB-0xFF showed nothing.
 - Control bytes: a leading 0x0A hid the whole text. 0x14-0x1D draw wider icons that scroll, some of them
   animated: batteries that look low or charging, with waves moving to and from them; a boxed Z; music notes
