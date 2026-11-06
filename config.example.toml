@@ -72,6 +72,17 @@ pause_minutes = 10
 # closing = "18:00"
 # closing_days = ["Mon", "Tue", "Wed", "Thu", "Fri"]
 
+# Optional: daily check-ins, things to do at set times that the clock keeps asking about (a sound and the
+# light flash every 10 minutes for 2 hours, then quietly in the unread list) until you say they're done:
+# "hey glance, took my meds", or Clear on the panel. Clearing everything leaves them alone; "cancel" skips
+# one. Done on one clock clears it on all. "Did I take my meds?" says what's logged today (checkins.json).
+# [[checkins]]
+# name = "MEDS"                  # what the clock shows
+# times = ["08:00", "20:00"]     # 24-hour
+# words = ["meds", "pills"]      # what you call it out loud
+# clocks = ["office"]            # which clocks ask (default: all)
+# sound = "Shine"                # the nag's sound
+
 # A second clock with nothing but what you send it.
 # [clocks.kitchen]
 # address = "11:22:33:44:55:66"

@@ -47,8 +47,10 @@ class Unread:
         return item
 
     def clear(self, item_id=None):
+        """Clear one item, or everything but the daily check-ins, which wait to be confirmed (checkins.py)."""
         before = len(self.items)
-        self.items = [i for i in self.items if item_id and i["id"] != item_id]
+        self.items = [i for i in self.items if i["id"] != item_id] if item_id else \
+            [i for i in self.items if i.get("kind") == "checkin"]
         self._save()
         return before - len(self.items)
 

@@ -25,6 +25,7 @@ import claudeface
 import brain
 import calendars
 import calwatch
+import checkins
 import forecast
 import shopapp
 import statusring
@@ -377,7 +378,7 @@ async def read_body(request):
     return body
 
 
-def make_app(clocks, shop_url=None):
+def make_app(clocks, shop_url=None, checks=None):
     default = next(iter(clocks.values()))
 
     def pick(request, body=None):
@@ -432,6 +433,9 @@ def make_app(clocks, shop_url=None):
     async def clear_unread(request):
         body = await read_body(request)
         clock = pick(request, body)
+        item = next((i for i in clock.unread.items if i["id"] == body.get("id")), None) if body.get("id") else None
+        if item and item.get("checkin") and checks:  # clearing a check-in is confirming it, on every clock
+            return web.json_response({"cleared": 1, "say": await checks.done(key=item["checkin"])})
         cleared = clock.unread.clear(body.get("id"))
         await clock.refresh_ring()
         return web.json_response({"cleared": cleared})
@@ -521,6 +525,8 @@ def make_app(clocks, shop_url=None):
             return "/shopapi", {"path": "/api/followups/resolve", "body": {"text": args["text"]}, **target}
         if name == "clear_unread":
             return "/unread/clear", target
+        if name == "confirm_checkin":
+            return "/checkin", {"what": args.get("what", "")}
         return None
 
     def set_now():
@@ -540,11 +546,14 @@ def make_app(clocks, shop_url=None):
         """(clock, item) that a change or cancel means, on whichever clock it is; the named clock first."""
         what = args.get("what") or ""
         named = clocks.get(args.get("clock") or "")
+        # a check-in only when it's named ("cancel the meds"), so a bare "cancel" or "snooze" means a timer
+        def mine(c):
+            return [m for m in pickups.matches(c, what) if m[1].get("kind") != "checkin" or (checks and checks.said(what))]
         if named:
-            found = pickups.best(pickups.matches(named, what))
+            found = pickups.best(mine(named))
             if found:
                 return found
-        return pickups.best([m for c in clocks.values() for m in pickups.matches(c, what)])
+        return pickups.best([m for c in clocks.values() for m in mine(c)])
 
     async def cancel(args):
         """Clear the timer, pickup or stop meant (see locate). Returns the reply."""
@@ -552,6 +561,8 @@ def make_app(clocks, shop_url=None):
         if not found:
             return "There's nothing like that set."
         clock, item = found
+        if item.get("checkin") and checks:  # off every clock, logged as skipped
+            return await checks.done(key=item["checkin"], taken=False)
         clock.unread.clear(item["id"])
         await clock.refresh_ring()
         where = f" on the {clock.name} clock" if clock is not default else ""
@@ -563,6 +574,8 @@ def make_app(clocks, shop_url=None):
         if not found:
             return "There's nothing like that set."
         clock, item = found
+        if item["kind"] == "checkin":
+            return "A check-in can only be done or skipped. It asks again every few minutes until then."
         now, due = time.time(), None
         if (args.get("add_minutes") or 0) > 0:  # "five more minutes": added, never "five minutes from now"
             base = now if item["due"] <= now else item["due"]  # going off: from now; still ahead: later
@@ -622,12 +635,13 @@ def make_app(clocks, shop_url=None):
         with a sentence to say back."""
         body = await read_body(request)
         text = str(body.get("text", "")).strip()
-        parsed, via = clockvoice.parse(text, list(clocks)), "pattern"
+        parsed, via = (checks and checks.parse(text)) or clockvoice.parse(text, list(clocks)), "pattern"
         if parsed:
             path, args, reply = parsed
         else:
             via = "haiku"
-            understood = await brain.understand(api, text, list(clocks), set_now())
+            understood = await brain.understand(api, text, list(clocks), set_now(),
+                                                [e["name"] for e in checks.entries] if checks else ())
             if understood is None:
                 return web.json_response({"reply": "Sorry, I didn't get that clock command.", "via": "none"})
             if understood[0] == "reply":
@@ -663,6 +677,10 @@ def make_app(clocks, shop_url=None):
                         due_now = await shopapp.due(shop_url)  # take the resolved nag off the clock now
                         if due_now is not None:
                             shopapp.prune(default, due_now)
+            elif path == "/checkin":
+                reply = await checks.done(args.get("what", "")) if checks else "There are no check-ins set up."
+            elif path == "/checkin/ask":
+                reply = checks.status(args.get("what", "")) if checks else "There are no check-ins set up."
             elif path == "/note":
                 notebook.add(args["text"])
                 await clock.alert("voice", text="{sun} NOTED", color="Aqua", anim="Pulse", sound="NoneSound",
@@ -685,6 +703,8 @@ def make_app(clocks, shop_url=None):
                 clock.unread.clear()
                 await clock.refresh_ring()
                 reply = reply or "Cleared."
+                if any(i.get("kind") == "checkin" for i in clock.unread.items):
+                    reply += " Check-ins stay until they're done."
         except ValueError as e:
             return web.json_response({"reply": f"Sorry, {e}.", "via": via})
         except shopapp.ERRORS:
@@ -692,7 +712,7 @@ def make_app(clocks, shop_url=None):
         except Exception:
             log.exception("voice command failed: %r", text)
             return web.json_response({"reply": "The clock isn't answering.", "via": via})
-        if clock is not default and path not in ("/change", "/cancel"):  # those say where the item was
+        if clock is not default and path not in ("/change", "/cancel", "/checkin", "/checkin/ask"):  # those say where
             reply = f"{clock.name.capitalize()} clock: {reply}"
         log.info("voice (%s): %r -> %s", via, text, reply)
         return web.json_response({"reply": reply, "via": via})
@@ -852,9 +872,12 @@ async def main():
         if not tasks and cfg.get("shop_app", {}).get("url"):  # follow-up nags go to the first clock
             watchers["followups"] = lambda clock=clock: shopapp.watch_followups(clock, cfg["shop_app"])
         tasks += [asyncio.create_task(supervised(f"{name} {label}", start)) for label, start in watchers.items()]
+    checks = checkins.Checkins(cfg.get("checkins", []), clocks)  # daily check-ins, across all clocks
+    if checks.entries:
+        tasks.append(asyncio.create_task(supervised("check-ins", lambda: checkins.watch(checks))))
     if cfg.get("shop_app", {}).get("url"):  # pickups both ways with the shop app, across all clocks
         tasks.append(asyncio.create_task(supervised("pickup sync", lambda: pickupsync.watch(clocks, cfg["shop_app"]["url"]))))
-    runner = web.AppRunner(make_app(clocks, cfg.get("shop_app", {}).get("url")))
+    runner = web.AppRunner(make_app(clocks, cfg.get("shop_app", {}).get("url"), checks))
     await runner.setup()
     port = cfg.get("port", 8740)
     await web.TCPSite(runner, "0.0.0.0", port).start()

@@ -34,7 +34,7 @@ WHEN = {
 }
 
 
-def tools(clock_names):
+def tools(clock_names, checkin_names=()):
     clock = {"type": "string", "enum": [*clock_names, ""],
              "description": "Which clock, only if the speaker named one; else empty"}
 
@@ -91,7 +91,11 @@ def tools(clock_names):
              "('clocking out, recapped the power supply on the Juno').",
              {"done": {"type": "string", "description": "What they say they did this session, as said; else empty"}}),
         tool("clear_unread", "Clear everything waiting on the clock (only when asked to clear all of it).", {}),
-    ]
+    ] + ([tool("confirm_checkin", "The speaker says they have just done one of the daily check-ins the clock "
+               "asks about (" + ", ".join(checkin_names) + "), e.g. 'took my meds'. Only when they say it's done, "
+               "never for a question, 'haven't yet', 'need to' or 'remind me', or anything not in that list.",
+               {"what": {"type": "string", "enum": list(checkin_names), "description": "Which check-in"}})]
+         if checkin_names else [])
 
 
 def client():
@@ -101,7 +105,7 @@ def client():
     return anthropic.AsyncAnthropic(api_key=key, timeout=15.0, max_retries=1) if key else None
 
 
-async def understand(api, text, clock_names, set_now=""):
+async def understand(api, text, clock_names, set_now="", checkin_names=()):
     """Spoken text -> ("tool", name, input) or ("reply", sentence), or None if no API key or on error.
     set_now lists the timers, pickups and stops already set, so "the hour 37 timer" or "the bread
     one" can be found; for change and cancel, `what` should be words from that item's text."""
@@ -114,7 +118,7 @@ async def understand(api, text, clock_names, set_now=""):
             max_tokens=1024,
             output_config={"effort": "low"},
             system=SYSTEM,
-            tools=tools(clock_names),
+            tools=tools(clock_names, checkin_names),
             messages=[{"role": "user", "content": f"It is {now}. Clocks: {', '.join(clock_names)}.\n"
                        f"Set now:\n{set_now or '(nothing)'}\n\nSaid: {text}"}],
         )

@@ -23,6 +23,9 @@ KINDS = {
              "repeat_minutes": 5, "repeats": 6, "due_sound": "Waves"},
     # a run of labelled stages on one native timer: cap reforming, glue-ups, burn-in, bench/admin rhythm
     "stages": {"label": "STAGES", "look": {"color": "Turquoise", "anim": "Wheel"}, "warn": (), "ring_from": None},
+    # a daily check-in (checkins.py), put up when due: nags until it's confirmed, then sits in the unread list
+    "checkin": {"label": "", "look": {"color": "SkyBlue", "anim": "Pulse"}, "warn": (), "ring_from": None,
+                "repeat_minutes": 10, "repeats": 12, "due_sound": "Shine"},
 }
 MAX_STAGES = 20  # the clock refuses a Timer with more intervals (0x87, firmware 1.6.7)
 MAX_STAGE_S = MAX_RUN_S = 24 * 3600
@@ -242,12 +245,15 @@ def next_stage(item, spec, now):
         fired.extend(reached)  # several reached at once (a late start): say only the nearest
         return f"{min(reached)} MIN", ALERT["sound"]
     if not item.get("done"):
-        item["done"], item["repeated"] = True, 0
-        return "NOW", spec.get("due_sound", ALERT["sound"])
+        # come up late (the bridge was down): the repeats already missed are skipped, not fired in a burst
+        every = spec.get("repeat_minutes")
+        missed = min(spec.get("repeats", 0), int((now - due) // (every * 60))) if every else 0
+        item["done"], item["repeated"] = True, missed
+        return "NOW", item.get("sound") or spec.get("due_sound", ALERT["sound"])
     every = spec.get("repeat_minutes")
     if every and item["repeated"] < spec["repeats"] and now >= due + (item["repeated"] + 1) * every * 60:
         item["repeated"] += 1
-        return "NOW", spec.get("due_sound", ALERT["sound"])
+        return "NOW", item.get("sound") or spec.get("due_sound", ALERT["sound"])
     return None
 
 
@@ -273,8 +279,9 @@ async def watch(clock):
                 continue
             stage, sound = owed
             name = item.get("name", "")
+            words = (spec["label"], stage, name) if spec["label"] else (name, stage)  # "MEDS NOW"
             try:
-                await clock.notify(text=" ".join(filter(None, (spec["label"], stage, name)))[:120],
+                await clock.notify(text=" ".join(filter(None, words))[:120],
                                    **spec["look"], sound=sound, priority=ALERT["priority"], flash=stage == "NOW")
                 log.info("%s %s: %s", spec["label"], stage, name)
             except Exception as e:

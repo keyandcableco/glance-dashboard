@@ -12,6 +12,7 @@ screens-*.json
 calendars-*
 message-*.json
 notes.json
+checkins.json
 pickups-sync.json
 *.tmp
 
