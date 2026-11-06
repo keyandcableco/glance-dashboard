@@ -186,6 +186,14 @@ Firmware 1.5.9 and 1.5.10 alerted at start − reminder (expected). Two extra fi
   or the scene is refused with 0x85 (expected). Probably the app's "Recurring" calendar mode (a guess from
   Glance's help pages).
 
+**One calendar screen** (seen once, filmed 2026-11-06). With appointments scenes saved in two slots (7: one
+block at 12:00; 10: four blocks 10:45-11:45, written later, both header mode 8), the rotation still had a
+single calendar screen (Scene notify 0x86 once a lap), and it showed only slot 10's blocks. Deleting slot 10
+(`33, 0, 0, 10`) took its blocks off: from the next lap on, slot 7's block was back, and slot 10's didn't come
+round again in the 5 minutes (6 laps) watched. So a delete removes an appointments scene like any other, and
+the other slot's scene is kept underneath. Whether the clock shows the newest scene or the highest slot is
+untested.
+
 ## Text
 
 The text line decodes **UTF-8** (seen, from notices of four bytes each):
