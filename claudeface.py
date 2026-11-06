@@ -1,6 +1,7 @@
 """Claude's face: one more screen in the turn that shows how the Claude Code sessions on this computer are
-doing, as an emoji face drawn on the rings, with a steady pip on the outer ring at 12 o'clock for each
-session that needs you and you haven't looked at, in its state's colour.
+doing, as an emoji face drawn on the rings, with eyebrows of steady pips on the outer ring, one for each
+session that needs you and you haven't looked at, in its state's colour: errors and waiting ones over the
+left eye, finished ones over the right.
 
   a turn died on an error        a dizzy face in red, x eyes and an open mouth        a red pip each
   a session waits on you         wide eyes and an O mouth; it blinks                  an orange pip each
@@ -12,6 +13,8 @@ session that needs you and you haven't looked at, in its state's colour.
 The first of these there is picks the face. Waiting sessions you've already looked at come last: a
 tracker may keep them for days, and ahead of the others they'd hide the smile and the looking around.
 Pips only for what needs you: one for every session, seen and working ones too, was too many to read.
+In one row across 12 o'clock they were nearly eyebrows already; split over the eyes they read as them.
+A brow holds MAX_BROW; one with none leaves the other raised.
 
 The states come from a session tracker, a Python file run inside the bridge, set per clock in
 config.toml ([clocks.<name>.claude_face] tracker = ..., a relative path from this folder). It defines a
@@ -42,8 +45,10 @@ SLOT = 8
 SKIN = "Darkorange"
 PIP_COLORS = {"error": "Red", "waiting": "Darkorange", "done": "LimeGreen"}  # the states that get a pip
 ORDER = ("error", "waiting", "done", "running", "waitingSeen")  # the first one there picks the face; the pips from the left
+BROWS = (("error", "waiting"), ("done",))  # the pips over the left eye, then over the right
+BROW = 41  # the outer ring's LED over the left eye's middle; the right brow is its mirror image
+MAX_BROW = 4  # pips a brow
 HERE = Path(__file__).parent
-MAX_PIPS = 9
 REFRESH_S = 10  # how often the tracker's files are looked at again
 SECOND = 50  # frames
 
@@ -110,18 +115,24 @@ def segments(layers):
     return [statusring.segment(p, w, c, r, x) for p, w, c, r, x in ringwords.rectangles(g)]
 
 
-def pips(states):
-    """[(LED, state)] on the outer ring, centred on LED 0, two LEDs apart, worst first from the left."""
-    n = len(states)
-    return [((2 * i - n + 1) % 48, s) for i, s in enumerate(states)]
+def brows(states):
+    """The states that get a pip, one tuple a brow (BROWS), in ORDER, at most MAX_BROW each."""
+    return tuple(tuple(s for s in states if s in side)[:MAX_BROW] for side in BROWS)
+
+
+def pips(left, right):
+    """[(LED, state)] on the outer ring: each brow's pips two LEDs apart and centred over its eye, worst
+    first from the left. A brow with none is left out; the other stays over its eye."""
+    return [((middle + 2 * i - len(states) + 1) % 48, s)
+            for middle, states in ((BROW, left), (47 - BROW, right)) for i, s in enumerate(states)]
 
 
 def scene_bytes(want):
-    state, states = want
+    state, (left, right) = want
     face, moves = FACES[state]
     scene, obj = pb.CustomScene(), pb.CustomScene.Object
     scene.object.add(method=obj.Fill, lifeTime=statusring.LIFETIME, result=obj.OK).fill.segment.extend(
-        segments(face + [([(0, p)], PIP_COLORS[s]) for p, s in pips(states)]))
+        segments(face + [([(0, p)], PIP_COLORS[s]) for p, s in pips(left, right)]))
     for seconds, layers in moves:
         scene.object.add(method=obj.Fill, startTime=round(seconds * SECOND), lifeTime=statusring.LIFETIME,
                          result=obj.OK).fill.segment.extend(segments(layers))
@@ -168,7 +179,7 @@ def picture(clock, now):
     if not path:
         return ()
     states = TRACKERS.setdefault(path, Sessions(path)).states(now)
-    return (states[0], tuple(s for s in states if s in PIP_COLORS)[:MAX_PIPS]) if states else ()
+    return (states[0], brows(states)) if states else ()
 
 
 def watch(clock):
@@ -178,9 +189,9 @@ def watch(clock):
 if __name__ == "__main__":  # print each face's size, and the states the tracker sees now
     import sys
     for state in ORDER:
-        for n in (0, MAX_PIPS):
-            data = scene_bytes((state, (state if state in PIP_COLORS else "waiting",) * n))
-            print(f"{state:11} {n} pips {len(data):3} B")
+        for n in (0, MAX_BROW):
+            data = scene_bytes((state, (("error",) * n, ("done",) * n)))
+            print(f"{state:11} {2 * n} pips {len(data):3} B")
     if len(sys.argv) > 1:
         states = Sessions(sys.argv[1]).states(time.time())
-        print(states, "pips:", [s for s in states if s in PIP_COLORS][:MAX_PIPS])
+        print(states, "brows:", brows(states))
