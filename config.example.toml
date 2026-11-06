@@ -15,6 +15,17 @@ address = "AA:BB:CC:DD:EE:FF"   # bluetoothctl devices, after pairing (see READM
 # schedule_ring = false         # start with the schedule ring screen off
 # animation_screen = false      # start with the animation screen (burn-in fire, holidays) off
 # screensaver = true            # start with the screensaver screen (a different animation each turn) on
+# words_screen = false          # start with the words screen (words round the rings) off
+
+# Optional: what the words screen says when nothing's typed on the panel. The command is run every
+# every_minutes; the first line it prints goes on the top half, the second on the bottom, or one line runs
+# on from the top to the bottom. About 6 letters fit upright on each half: print the few words that matter.
+# Printing nothing leaves the screen out of the turn. Say, a script that prints your next to-do.
+# [clocks.office.words]
+# command = "~/bin/next-todo --short"
+# every_minutes = 5
+# top_color = "Aqua"
+# bottom_color = "Darkorange"
 
 # Optional: Claude's face, a screen showing how your Claude Code sessions are doing. It needs a session
 # tracker you write: a Python file, run inside the bridge, with a SessionRing class whose refresh(now)

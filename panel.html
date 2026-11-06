@@ -511,9 +511,9 @@
           </select></span></label>
           <span class="grow"></span>
           <button class="btn" id="rwClear" disabled>Clear</button>
-          <button class="btn primary" id="rwShow">Show now</button>
+          <button class="btn primary" id="rwShow">Show</button>
         </div>
-        <p class="hint">Takes over the whole face, the time and date too, until the time&rsquo;s up or you clear it. High, highest and critical alerts still come through, and the words come back after; low and medium ones wait until they&rsquo;re off. Letters, digits, spaces and &amp; ! ? - : *, and &lt;3 for a heart. About 6 letters fit on each half; longer lines run down the sides and read sideways.</p>
+        <p class="hint">One of the screens in turn, about 15 seconds each time it comes round, with the time and date under it. What you type shows instead of the words source&rsquo;s until the time&rsquo;s up or you clear it; with neither, the screen sits out. Letters, digits, spaces and &amp; ! ? - : *, and &lt;3 for a heart. About 6 letters fit on each half; longer lines run down the sides and read sideways.</p>
       </section>
     </div>
 
@@ -817,10 +817,8 @@ function wedge(ring, from, span, color) {  // light `span` units clockwise from 
 function drawFace(now = Date.now()) {
   const link = !!(S.bridge && S.status && S.status.connected);
   const L = RINGS.map(() => Array(48).fill(null));
-  const words = link ? rwShowing(now) : null, cd = link && !words ? countdown(now) : null, d = new Date(now);
-  if (words) {  // mode 0 takes the whole face: the words on the rings, the text line dark
-    words.forEach((ring, k) => ring.forEach((c, i) => { if (c) L[k][i] = [led(c), 1]; }));
-  } else if (cd) {  // the clock's own timer face (photo, 2026-11-05): the time left as wedges from the hands to the end time
+  const cd = link ? countdown(now) : null, d = new Date(now);
+  if (cd) {  // the clock's own timer face (photo, 2026-11-05): the time left as wedges from the hands to the end time
     const sec = d.getSeconds() + d.getMilliseconds() / 1000, min = d.getMinutes() + sec / 60;
     wedge(L[1], min, Math.floor(cd.left / 60), TIMER_MIN_COLOR);  // whole minutes left, from the minute hand, 60 minutes a turn
     wedge(L[0], sec, cd.left % 60, TIMER_COLOR);  // the seconds over whole minutes, from the current second, 60 a turn
@@ -840,14 +838,14 @@ function drawFace(now = Date.now()) {
   const s = S.settings;
   hourDots.forEach(e => e.style.display = s && s.night_mode ? "none" : "");  // night mode hides them, as on the clock
   const left = cd && Math.ceil(cd.left);
-  faceMatrix(words ? [] : textCols(cd ? `${String(Math.floor(left / 60)).padStart(2, "0")}:${String(left % 60).padStart(2, "0")}` : `${DAY[d.getDay()]} ${d.getDate()}`));
+  faceMatrix(textCols(cd ? `${String(Math.floor(left / 60)).padStart(2, "0")}:${String(left % 60).padStart(2, "0")}` : `${DAY[d.getDay()]} ${d.getDate()}`));
   const m = d.getMinutes() + d.getSeconds() / 60, ha = `rotate(${((d.getHours() % 12 + m / 60) * 30).toFixed(2)})`, ma = `rotate(${(m * 6).toFixed(2)})`;
   ["hh", "hhS"].forEach(id => $(id).setAttribute("transform", ha));
   ["mh", "mhS"].forEach(id => $(id).setAttribute("transform", ma));
   let level = s ? (s.brightness === 0 ? .78 : .55 + .45 * s.brightness / 255) * (s.night_mode ? .65 : 1) : 1;
   $("faceLeds").style.opacity = link ? level : .45;
   const say = [S.status ? S.status.name + " clock" : "Clock", d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }), $("conn").textContent.toLowerCase(),
-    S.unread.length + " unread", cd ? itemLabel(cd.item) + ", " + span(cd.left) + " left" : "", words ? "showing " + rwWords(S.message.showing) : ""].filter(Boolean).join(", ");
+    S.unread.length + " unread", cd ? itemLabel(cd.item) + ", " + span(cd.left) + " left" : ""].filter(Boolean).join(", ");
   if ($("faceSvg").getAttribute("aria-label") !== say) $("faceSvg").setAttribute("aria-label", say);
 }
 
@@ -1215,9 +1213,12 @@ const SCREENS = [
     parts: [{ a0: 0, a1: 60, c: "#ff0000" }, { a0: 60, a1: 120, c: "#ff8c00" }, { a0: 120, a1: 180, c: "#00ff00" }, { a0: 180, a1: 240, c: "#00ffff" }, { a0: 240, a1: 300, c: "#4169e1" }, { a0: 300, a1: 360, c: "#8a2be2" }] },
   { key: "claude", name: "Claude", d: "A face for the Claude Code sessions: dizzy and red when a turn died, wide-eyed when one waits on you, smiling when one finished, looking around while they work; a pip at 12 o'clock for each one that needs you.", setup: "a [claude_face] section",
     parts: [{ a0: -55, a1: -35, c: "#ff8c00" }, { a0: 35, a1: 55, c: "#ff8c00" }, { a0: 135, a1: 225, c: "#ff8c00" }, { a0: -8, a1: 8, c: "#ff8c00" }] },
+  { key: "words", name: "Words", d: "Two lines in letters round the rings: what you type under Words on the rings, else what the words source says; out of the turn when there's nothing.",
+    parts: [{ a0: -40, a1: 40, c: "#00ffff" }, { a0: 145, a1: 215, c: "#ff8c00" }] },
 ];
 function renderScreens(s) {  // s: what GET /screens says, or null when it can't be read
   S.screens = s; drawFace();  // the status ring screen switched off leaves the outer ring dark
+  if (S.message) renderMessage(S.message);  // it says when the words screen is off
   $("screens").innerHTML = SCREENS.map(x => {
     const face = `<span class="chipled">${miniRing(x.parts)}</span>`;
     if (x.key === "time")
@@ -1325,35 +1326,37 @@ function rwLayout(top, bottom, topColor, bottomColor) {  // {grid, error, sidewa
   if ([...spans[0]].some(p => spans[1].has(p))) return { error: "The top and bottom lines run into each other: shorten one", grid };
   return { grid, sideways };
 }
-function rwShowing(now) {  // the grid the clock shows now, or null
-  const m = S.message && S.message.showing;
-  if (!m || !RW_FONT || (m.until && m.until * 1000 <= now)) return null;
-  return rwLayout(m.top, m.bottom, m.top_color, m.bottom_color).grid || null;
-}
 const rwSet = ledSetter(ringCells($("rwLeds")));
 $("rwTopColor").innerHTML = $("rwBottomColor").innerHTML = RW_COLORS.map(([v, label]) => `<option value="${v}">${label}</option>`).join("");
 $("rwTopColor").value = "Aqua"; $("rwBottomColor").value = "Darkorange";
-function rwPreview() {
-  const top = rwTidy($("rwTop").value), bottom = rwTidy($("rwBottom").value), ghost = !top && !bottom;
+const rwNow = m => m && (m.typed || m.said) || null;  // what the words screen says now: typed words first
+const rwOff = () => !!(S.screens && S.screens.words && !S.screens.words.on);
+function rwPreview() {  // what's typed, else what the screen says now, else the placeholder (dim)
+  const top = rwTidy($("rwTop").value), bottom = rwTidy($("rwBottom").value), typing = !!(top || bottom), now = !typing && rwNow(S.message);
   const tc = $("rwTopColor").value, bc = $("rwBottomColor").value;
   $("rwTopSw").style.setProperty("--c", led(tc)); $("rwBottomSw").style.setProperty("--c", led(bc));
-  $("rw").classList.toggle("ghost", ghost);
-  const r = RW_FONT ? rwLayout(ghost ? rwTidy($("rwTop").placeholder) : top, ghost ? rwTidy($("rwBottom").placeholder) : bottom, tc, bc)
-    : { error: "Can't lay out words: the bridge isn't answering" };
+  $("rw").classList.toggle("ghost", !typing && !now);
+  const r = !RW_FONT ? { error: "Can't lay out words: the bridge isn't answering" }
+    : typing ? rwLayout(top, bottom, tc, bc)
+    : now ? rwLayout(now.top, now.bottom, now.top_color, now.bottom_color)
+    : rwLayout(rwTidy($("rwTop").placeholder), rwTidy($("rwBottom").placeholder), tc, bc);
   const grid = r.grid || RINGS.map(() => Array(48).fill(null));
   grid.forEach((ring, k) => ring.forEach((c, i) => rwSet(k, i, c ? [led(c), 1] : null)));
-  const note = ghost ? "" : r.error || (r.sideways ? "Past about 6 letters a line, the words run down the sides and read sideways." : "");
-  $("rwNote").textContent = note; $("rwNote").classList.toggle("bad", !!r.error && !ghost);
-  $("rwShow").disabled = !!r.error && !ghost;
+  const note = !typing ? "" : r.error || (r.sideways ? "Past about 6 letters a line, the words run down the sides and read sideways." : "");
+  $("rwNote").textContent = note; $("rwNote").classList.toggle("bad", !!r.error && typing);
+  $("rwShow").disabled = !!r.error && typing;
 }
 function renderMessage(m) {  // what GET /message says, or null when it can't be read
-  S.message = m; drawFace();
-  const s = m && m.showing;
-  $("rwLed").className = "cled " + (s ? "on" : m && m.on_clock ? "warn" : "");
-  $("rwState").textContent = !m ? "Unknown: the bridge isn't answering"
-    : s ? `Showing ${rwWords(s)} · ${s.until ? "until " + clockTime(s.until) : "until cleared"}`
-    : m.on_clock ? "Coming off the rings as soon as the bridge reaches the clock" : "Nothing on the rings";
-  $("rwClear").disabled = !(m && (s || m.on_clock));
+  S.message = m;
+  const t = m && m.typed, said = m && m.said, off = rwOff() ? " · the Words screen is off" : "";
+  $("rwLed").className = "cled " + (!m ? "" : off || (!t && m.error) ? "warn" : t || said ? "on" : "");
+  $("rwState").textContent = (!m ? "Unknown: the bridge isn't answering"
+    : t ? `Typed: ${rwWords(t)} · ${t.until ? "until " + clockTime(t.until) : "until cleared"}`
+    : said ? `From the words source: ${rwWords(said)}${m.error ? " · its last run failed: " + m.error : ""}`
+    : m.error ? `The words source failed: ${m.error}`
+    : m.source ? "The words source has nothing to say, so the screen sits out" : "Nothing to say, so the screen sits out") + (m ? off : "");
+  $("rwClear").disabled = !t;
+  rwPreview();
 }
 async function loadMessage() {
   const asked = CLOCK;
@@ -1371,9 +1374,10 @@ $("rwShow").onclick = async () => {
   try {
     const m = await api("/message", { top, bottom, top_color: $("rwTopColor").value, bottom_color: $("rwBottomColor").value, minutes: +$("rwFor").value });
     if (CLOCK === asked) renderMessage(m);
-    toast(`On the rings: ${rwWords(m.showing || { top, bottom })}`);
+    $("rwTop").value = $("rwBottom").value = "";
+    toast(`${rwWords(m.typed || { top, bottom })}: ${rwOff() ? "saved, but the Words screen is off" : "on the clock when the words come round"}`);
   } catch (e) { toast("Not shown: " + e.message, true); }
-  finally { b.textContent = "Show now"; rwPreview(); }
+  finally { b.textContent = "Show"; rwPreview(); }
 };
 $("rwClear").onclick = async () => {
   const asked = CLOCK, b = $("rwClear");
@@ -1381,7 +1385,7 @@ $("rwClear").onclick = async () => {
   try {
     const m = await api("/message", { clear: true });
     if (CLOCK === asked) renderMessage(m);
-    toast(m.on_clock ? "Cleared; it comes off as soon as the bridge reaches the clock" : "Cleared");
+    toast(m.said ? `Cleared; back to the words source: ${rwWords(m.said)}` : "Cleared");
   } catch (e) { toast("Not cleared: " + e.message, true); loadMessage(); }
 };
 

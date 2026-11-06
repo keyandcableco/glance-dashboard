@@ -729,7 +729,7 @@ def make_app(clocks, shop_url=None):
         return web.json_response(pick(request).screens.json())
 
     async def set_screens(request):
-        """{"status", "forecast", "schedule", "animation", "screensaver", "claude": true or false}; each screen's watcher puts
+        """{"status", "forecast", "schedule", "animation", "screensaver", "claude", "words": true or false}; each screen's watcher puts
         it on or takes it off the clock within half a minute (later if an alert is showing)."""
         body = await read_body(request)
         clock = pick(request, body)
@@ -779,22 +779,18 @@ def make_app(clocks, shop_url=None):
         return web.json_response(pick(request).message.json())
 
     async def set_message(request):
-        """{"top", "bottom", "top_color", "bottom_color", "minutes"}: words on the rings now, taking the whole
-        face until the minutes are up (0: until cleared); or {"clear": true} to take them off."""
+        """{"top", "bottom", "top_color", "bottom_color", "minutes"}: words for the words screen, in place of
+        the words source's until the minutes are up (0: until cleared); or {"clear": true} to take them off.
+        The screen's watcher draws them within half a minute; the clock shows them when it comes round."""
         body = await read_body(request)
         clock = pick(request, body)
         try:
             if body.get("clear") is True:
-                await clock.message.clear(clock)
+                clock.message.clear()
             else:
-                await clock.message.show(clock, **{k: body[k] for k in ("top", "bottom", "top_color", "bottom_color", "minutes")
-                                                   if k in body})
+                clock.message.show(**{k: body[k] for k in ("top", "bottom", "top_color", "bottom_color", "minutes") if k in body})
         except ValueError as e:
             return web.json_response({"error": str(e)}, status=400)
-        except ringwords.NotShown as e:
-            return web.json_response({"error": str(e)}, status=503)
-        except OSError as e:
-            return web.json_response({"error": f"couldn't save: {e.strerror or type(e).__name__}"}, status=500)
         return web.json_response(clock.message.json())
 
     async def options(request):
@@ -847,6 +843,8 @@ async def main():
             watchers["mail"] = lambda clock=clock, c=c: mailwatch.watch(clock, c["mail"])
         if "texts" in c:
             watchers["texts"] = lambda clock=clock, c=c: textwatch.watch(clock, c["texts"])
+        if "words" in c:
+            watchers["words source"] = lambda clock=clock, c=c: ringwords.follow(clock, c["words"])
         watchers["calendar"] = lambda clock=clock: calwatch.watch(clock)  # calendars can be added on the panel
         # without a [forecast] section it only makes sure no forecast is left on the clock
         watchers["forecast"] = lambda clock=clock, c=c: forecast.watch(clock, c.get("forecast") or {})

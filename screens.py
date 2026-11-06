@@ -1,10 +1,11 @@
 """Which screens a clock shows in turn, besides its own time and date: the status ring, the forecast,
-the schedule ring, the animation screen, the screensaver and Claude's face. Each is a saved scene in its own slot; a
-screen that's off is deleted from the clock by its watcher, which then leaves it off.
+the schedule ring, the animation screen, the screensaver, Claude's face and the words on the rings. Each is
+a saved scene in its own slot; a screen that's off is deleted from the clock by its watcher, which then
+leaves it off.
 
 Starting values per clock come from config.toml (status_ring = false, schedule_ring = false,
-animation_screen = false, screensaver = true; the forecast exists only with a [forecast] section, Claude's
-face only with a [claude_face] one);
+animation_screen = false, screensaver = true, words_screen = false; the forecast exists only with a
+[forecast] section, Claude's face only with a [claude_face] one);
 changes made on the panel are kept in screens-<name>.json and win over the config.
 """
 import json
@@ -13,13 +14,14 @@ from pathlib import Path
 import animscreen
 import claudeface
 import forecast
+import ringwords
 import schedulering
 import screensaver
 import statusring
 
 HERE = Path(__file__).parent
 SLOTS = {"status": statusring.SLOT, "forecast": forecast.SLOT, "schedule": schedulering.SLOT, "animation": animscreen.SLOT,
-         "screensaver": screensaver.SLOT, "claude": claudeface.SLOT}
+         "screensaver": screensaver.SLOT, "claude": claudeface.SLOT, "words": ringwords.SLOT}
 WORDS = {"true": True, "on": True, "1": True, "false": False, "off": False, "0": False}
 
 
@@ -27,10 +29,11 @@ class Screens:
     def __init__(self, name, cfg):
         self.path = HERE / f"screens-{name}.json"
         self.available = {"status": True, "forecast": "forecast" in cfg, "schedule": True, "animation": True,
-                          "screensaver": True, "claude": bool(claudeface.tracker(cfg))}
+                          "screensaver": True, "claude": bool(claudeface.tracker(cfg)), "words": True}
         self.start = {"status": bool(cfg.get("status_ring", True)), "forecast": True,
                       "schedule": bool(cfg.get("schedule_ring", True)), "animation": bool(cfg.get("animation_screen", True)),
-                      "screensaver": bool(cfg.get("screensaver", False)), "claude": True}
+                      "screensaver": bool(cfg.get("screensaver", False)), "claude": True,
+                      "words": bool(cfg.get("words_screen", True))}
         self.saved = {}  # only the screens switched on the panel, so the config still decides the rest
         try:
             saved = json.loads(self.path.read_text())

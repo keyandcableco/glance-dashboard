@@ -55,16 +55,17 @@ of his `Glance.proto`, fixed so `protoc` accepts it. Everything here builds on t
   when one waits on you, a winking smile when one finished since you last looked, eyes looking around
   while they work, and a pip at 12 o'clock for each session that needs you and you haven't looked at
   yet. Nothing to show, no screen.
-- **Words on the rings**: type a top and a bottom line on the panel and they're drawn in letters round the
-  four rings (a 3×4 font, about 6 letters a half; the bottom line is turned over so it reads upright). It
-  takes the whole face at once, time and date too, for the minutes you pick or until you clear it. High,
-  highest and critical alerts still show over it and it comes back after; low and medium ones wait. The
-  bridge takes it off, so if the bridge stops while words are up, they stay until it's back.
+- **Words on the rings**: a screen of two lines drawn in letters round the four rings (a 3×4 font, about
+  6 letters a half; the bottom line is turned over so it reads upright). It says what a words source says:
+  a command of your own, run every few minutes, that prints the few words that matter (your next to-do,
+  say; see `config.example.toml`). Words typed on the panel show instead, for the minutes you pick or until
+  you clear them. Nothing to say, no screen.
 - **Screens**: the clock shows its time and date, the status ring, the forecast, the schedule ring, the
-  animation screen, the screensaver and Claude's face in turn, about 15 seconds each (the clock picks the
-  next one, often the same one again). Switch each of the last six on or off per clock on the panel (it's kept in
-  `screens-<name>.json`); `status_ring = false`, `schedule_ring = false`, `animation_screen = false` or
-  `screensaver = true` in a clock's section only sets where it starts.
+  animation screen, the screensaver, Claude's face and the words in turn, about 15 seconds each (the clock
+  picks the next one, often the same one again). Switch each of the last seven on or off per clock on the
+  panel (it's kept in `screens-<name>.json`); `status_ring = false`, `schedule_ring = false`,
+  `animation_screen = false`, `screensaver = true` or `words_screen = false` in a clock's section only sets
+  where it starts.
 - **Hyperfocus nudges**: a break reminder after a long stretch of keyboard/mouse activity, wrap-up and
   closing-time nudges. Snooze from the panel.
 - **Voice**: `clockvoice.py` takes a transcribed sentence ("Sam's swinging by for the Juno after lunch").
@@ -176,8 +177,8 @@ All on `http://127.0.0.1:8740`; every call takes an optional `clock` (name), def
 | `GET/POST /settings` | `brightness, night_mode, dnd, dnd_from, dnd_till` | The clock's own settings |
 | `GET/POST /nudges` | `breaks, break_minutes, pause_minutes, closing, closing_days, snooze_minutes` | |
 | `GET/POST /calendars` | `add: {name, url}` (a secret iCal address, checked by reading it once) or `remove: id` | A clock's calendars by name and host; the addresses stay in `calendars-<name>.json` (mode 0600) and are never sent back |
-| `GET/POST /message` | `top, bottom, top_color, bottom_color, minutes` (default 5; 0: until cleared), or `clear: true` | Words on the rings, taking the whole face now; up to 16 characters a line |
-| `GET/POST /screens` | `status, forecast, schedule, animation, screensaver, claude` (each `true` or `false`) | Which screens the clock shows in turn; applied within half a minute |
+| `GET/POST /message` | `top, bottom, top_color, bottom_color, minutes` (default 5; 0: until cleared), or `clear: true` | Typed words for the words screen, in place of the words source's; up to 16 characters a line. Returns `typed`, `said` (the words source's last words), `source`, `error` |
+| `GET/POST /screens` | `status, forecast, schedule, animation, screensaver, claude, words` (each `true` or `false`) | Which screens the clock shows in turn; applied within half a minute |
 | `POST /sound` | `sound` (a name; `NoneSound` stops it) | Play one of the clock's sounds; the bridge stops it after 5 s |
 | `GET /status`, `GET /options` | | Connection, unread counts, the active stretch toward a break nudge (`focus`); the names of colors, sounds, icons |
 

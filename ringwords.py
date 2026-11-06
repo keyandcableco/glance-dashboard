@@ -1,4 +1,5 @@
-"""Words on the rings: a message typed on the panel, drawn in letters round the clock's four rings.
+"""Words on the rings: two lines drawn in letters round the clock's four rings, one more screen in the
+turn. They say what was typed on the panel while it lasts, else what the clock's words source says.
 
 The 4 rings of 48 LEDs make a display 4 lights tall and 48 wide that wraps round the dial. The font is
 3×4 (capitals, digits, & ! ? - : *, and <3 for a heart), with a blank column between letters. The top
@@ -8,34 +9,47 @@ right way up. About 6 letters fit on each half; longer lines run down the sides 
 lit LEDs are cut into rectangles, one ring segment each: two words are about 160 bytes. All of it was
 seen on the shop clock (2026-11-05).
 
-Show now writes it as a saved scene in SLOT, mode 0 at PRIORITY: it takes the whole face at once, the
-time and date too, and holds it until it's deleted. A mode-0 arrival takes the face only if its priority
-beats what's showing (the 1.6.7 firmware), so the words beat the screens in turn (16), and a high,
-highest or critical alert beats the words; a low or medium one waits until they're off. The bridge deletes it when its minutes are up or on
-Clear. The message and its end are kept in message-<name>.json, so a restart still takes it off; after
-an alert, which takes the face, it's written again.
+It's a saved scene in watch-face mode in SLOT, kept drawn by statusring.watch like the other screens
+(never during an alert or a countdown's alarm), and switched on and off on the panel as the "words"
+screen; with nothing to say it leaves the turn (its slot deleted). Typed words and their end are kept in
+message-<name>.json. Until 2026-11-06 typed words took the whole face at once (mode 0, priority 40);
+now they take their turn like the other screens, and a source keeps the screen saying something useful.
+
+The words source, set per clock in config.toml ([clocks.<name>.words] command = "..."), is a command run
+every every_minutes: the first line it prints is the top line and the second the bottom, or one line
+runs on from the top to the bottom. Accents come off, apostrophes and the . or , inside a number are
+dropped, other characters the font lacks become spaces, and each line keeps the words that fit upright on
+its half (a word too long for a half is cut). Printing nothing says nothing. A command that fails is tried
+again within a minute and keeps its last words for STALE_S (two runs, if that's longer), then they go.
 """
 import asyncio
+import contextlib
 import json
 import logging
+import os
+import re
+import shlex
+import signal
 import time
+import unicodedata
 from pathlib import Path
 
 import statusring
-from glance import PRIORITIES, pb
+from glance import FOLD, pb
 
 HERE = Path(__file__).parent
 SLOT = 1
-PRIORITY = 40  # above the screens in turn (16), below a high alert (48)
 RINGS, LEDS = 4, 48
 LINE_CHARS = 16
+HALF = LEDS // 2 - 1  # columns a line has upright on its half, with a dark LED between it and the other
 MAX_MINUTES = 24 * 60
 MAX_BYTES = 500  # one Bluetooth write carries at most 512
-CHECK_S = 5
-RETRY_S = 30  # after a failed write
-AFTER_ALERT_S = 90  # an alert in several pieces can show longer than the screens' 45-s wait
 LINES = ((0, False), (LEDS // 2, True))  # (centre LED, turned over): the top line, the bottom line
-DELETE = bytes([statusring.SCENES_DELETE, 0, 0, SLOT])
+COLORS = ("Aqua", "Darkorange")  # the words source's top and bottom line, unless its section names others
+EVERY_MINUTES = 5
+RUN_S = 30  # a words command that takes longer is stopped
+STALE_S = 60 * 60
+RETRY_S = 60  # after a failed run, say before the network is up
 
 FONT = {
     "A": [".#.", "#.#", "###", "#.#"], "B": ["##.", "###", "#.#", "###"], "C": [".##", "#..", "#..", ".##"],
@@ -58,10 +72,6 @@ FONT = {
 }
 
 log = logging.getLogger("glanced.words")
-
-
-class NotShown(Exception):
-    """The clock didn't take the message (not connected, or the write failed)."""
 
 
 def tidy(text):
@@ -150,25 +160,22 @@ def rectangles(g):
     return out
 
 
-def scene_bytes(g):
+
+
+def draw(g):
     scene, obj = pb.CustomScene(), pb.CustomScene.Object
     scene.object.add(method=obj.Fill, lifeTime=statusring.LIFETIME, result=obj.OK).fill.segment.extend(
         statusring.segment(p, w, c, r, x) for p, w, c, r, x in rectangles(g))
-    return bytes([statusring.SCENE, PRIORITY, statusring.MODE_WHOLE, SLOT]) + scene.SerializeToString()
+    return bytes([statusring.SCENE, statusring.PRIORITY, statusring.MODE_WATCHFACE, SLOT]) + scene.SerializeToString()
 
 
-def blank_bytes():
-    """All four rings dark, written before the delete: a deleted scene's LEDs can stay lit until drawn over."""
-    scene, obj = pb.CustomScene(), pb.CustomScene.Object
-    scene.object.add(method=obj.Fill, lifeTime=50, result=obj.OK).fill.segment.append(statusring.segment(0, LEDS, "Black", 0, 3))
-    return bytes([statusring.SCENE, PRIORITY, statusring.MODE_WHOLE, SLOT]) + scene.SerializeToString()
-
-
-BLANK = blank_bytes()
+def scene_bytes(want):
+    """want: (top, bottom, top colour, bottom colour), as picture() gives it."""
+    return draw(grid(*want))
 
 
 def message(top, bottom, top_color, bottom_color, minutes):
-    """The message as kept, with the bytes that draw it; ValueError if it can't be shown."""
+    """Typed words as kept; ValueError if they can't be shown."""
     top, bottom = tidy(top), tidy(bottom)
     if not top and not bottom:
         raise ValueError("type something for the top or bottom line")
@@ -176,129 +183,174 @@ def message(top, bottom, top_color, bottom_color, minutes):
         raise ValueError(f"minutes must be 0 (until cleared) to {MAX_MINUTES}")
     msg = {"top": top, "bottom": bottom, "top_color": colour(top_color), "bottom_color": colour(bottom_color),
            "until": time.time() + minutes * 60 if minutes else None}
-    data = scene_bytes(grid(top, bottom, msg["top_color"], msg["bottom_color"]))
-    if len(data) > MAX_BYTES:
+    if len(draw(grid(top, bottom, msg["top_color"], msg["bottom_color"]))) > MAX_BYTES:
         raise ValueError("too much to draw at once: shorten it")
-    return msg, data
+    return msg
+
+
+def plain(text):
+    """Text in the font's characters: glance's folding (curly quotes, dashes), accents off, apostrophes
+    and the . or , inside a number dropped (XPANDER'S is XPANDERS, 1,000 is 1000), anything else it can't
+    draw a space (a letter from another script too: no "?" for it)."""
+    text = "".join(FOLD.get(c, c) for c in unicodedata.normalize("NFC", str(text or "")))
+    text = "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c)).upper()
+    text = re.sub(r"(?<=\d)[.,](?=\d)", "", text.replace("'", ""))
+    out, i = [], 0
+    while i < len(text):
+        key = "<3" if text.startswith("<3", i) else text[i]
+        out.append(key if key in FONT else " ")
+        i += len(key)
+    return tidy("".join(out))
+
+
+def width(text):
+    return len(columns(glyphs(text)))
+
+
+def fill(words, room=HALF):
+    """(as many of the words as fit in room columns, the words left): a first word too wide alone is cut."""
+    line = ""
+    for n, word in enumerate(words):
+        if width(f"{line} {word}".strip()) <= room:
+            line = f"{line} {word}".strip()
+            continue
+        if not line:
+            while word and width(word) > room:
+                word = word[:-1].removesuffix("<")  # never half a heart
+            return word, words[n + 1:]
+        return line, words[n:]
+    return line, []
+
+
+def fit(lines):
+    """(top, bottom) for a words source's output lines: the first on top and the second below, or a
+    single line running on from the top to the bottom; each upright on its half and one write long."""
+    lines = [plain(line) for line in list(lines)[:2]]
+    if len(lines) < 2 or not lines[1]:
+        top, rest = fill(lines[0].split() if lines else [])
+        bottom = fill(rest)[0]
+    else:
+        top, bottom = fill(lines[0].split())[0], fill(lines[1].split())[0]
+    while len(draw(grid(top, bottom, *COLORS))) > MAX_BYTES:  # only dense words; drop the longer line's last
+        if width(top) >= width(bottom):
+            top = top.rpartition(" ")[0]
+        else:
+            bottom = bottom.rpartition(" ")[0]
+    return top, bottom
 
 
 class Message:
-    """The message on one clock. showing: what it should show ({"top", "bottom", "top_color",
-    "bottom_color", "until"}, until None = until cleared), or None. on_clock: it may still be on the clock
-    (written, and not deleted since), so the watcher takes it off once nothing should show."""
+    """The words on one clock. typed: what was typed on the panel ({"top", "bottom", "top_color",
+    "bottom_color", "until"}, until None = until cleared), kept in message-<name>.json; said: what the
+    words source last said ({"top", "bottom", "at"}); either can be None. Typed words go first."""
 
     def __init__(self, name):
-        self.path = HERE / f"message-{name}.json"
-        self.showing, self.on_clock = None, False
-        self.lock = asyncio.Lock()  # one write or delete at a time, so the file and the clock agree
-        self.client, self.written, self.stale = None, 0.0, False  # the link and time of the last write
-        self.retry_at = 0.0  # after a failed write, the watcher waits RETRY_S
+        self.name, self.path = name, HERE / f"message-{name}.json"
+        self.typed, self.said, self.source, self.error, self.colors = None, None, False, None, COLORS
+        self.stale_s = STALE_S
         try:
-            saved = json.loads(self.path.read_text())
-            self.on_clock = bool(saved.get("on_clock"))
-            s = saved.get("showing")
-            if s:  # still drawable; the watcher takes it off if its minutes are up
+            s = json.loads(self.path.read_text()).get("showing")
+            if s:  # still drawable; words() drops it if its minutes are up
                 top, bottom, tc, bc = tidy(s["top"]), tidy(s["bottom"]), colour(s["top_color"]), colour(s["bottom_color"])
                 grid(top, bottom, tc, bc)
                 until = None if s.get("until") is None else float(s["until"])
-                self.showing = {"top": top, "bottom": bottom, "top_color": tc, "bottom_color": bc, "until": until}
+                self.typed = {"top": top, "bottom": bottom, "top_color": tc, "bottom_color": bc, "until": until}
         except FileNotFoundError:
             pass
         except (OSError, ValueError, AttributeError, TypeError, KeyError) as e:
-            log.warning("%s couldn't be read (%s); taking any message off the clock", self.path.name, type(e).__name__)
-            self.showing, self.on_clock = None, True
+            log.warning("%s couldn't be read (%s); no typed words", self.path.name, type(e).__name__)
 
-    def json(self):
-        return {"showing": self.showing, "on_clock": self.on_clock}
-
-    def _save(self, showing, on_clock):
-        """Write first, then change memory: OSError leaves both as they were."""
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"showing": showing, "on_clock": on_clock}, indent=1))
-        tmp.replace(self.path)
-        self.showing, self.on_clock = showing, on_clock
-
-    def _keep(self, showing, on_clock):
-        """Memory first, so a full disk can't keep words on the clock; the file follows if it can."""
-        self.showing, self.on_clock = showing, on_clock
+    def _save(self, typed):
+        """Memory first, so a full disk can't keep words up; the file follows if it can."""
+        self.typed = typed
         try:
-            self._save(showing, on_clock)
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"showing": typed}, indent=1))
+            tmp.replace(self.path)
         except OSError as e:
             log.warning("couldn't save %s: %s", self.path.name, e.strerror or type(e).__name__)
 
-    async def show(self, clock, top="", bottom="", top_color="Aqua", bottom_color="Aqua", minutes=5):
-        """Put it on the clock now. ValueError if it can't be drawn, NotShown if the clock didn't take it
-        (what showed before stays), OSError if it can't be saved (then nothing is sent)."""
-        msg, data = message(top, bottom, top_color, bottom_color, minutes)
-        async with self.lock:
-            if not clock.connected:
-                raise NotShown("the clock isn't connected")
-            before = self.showing
-            self._save(msg, True)  # on_clock before the write: one that fails may still have landed
-            try:
-                await clock.write(data)
-            except Exception as e:
-                # the clock most likely kept what it had: keep that, and have the watcher write it (or take it off) again
-                self._keep(before, True)
-                self.stale, self.retry_at = True, time.time() + CHECK_S
-                raise NotShown(f"the clock didn't take it ({e}); nothing changed") from e
-            self.client, self.written, self.stale = clock.client, time.time(), False
-        log.info("%s: words on the rings: %r / %r until %s", clock.name, msg["top"], msg["bottom"],
-                 time.strftime("%H:%M", time.localtime(msg["until"])) if msg["until"] else "cleared")
+    def show(self, top="", bottom="", top_color="Aqua", bottom_color="Darkorange", minutes=5):
+        """Typed words, shown when the screen next comes round; ValueError if they can't be drawn."""
+        self._save(message(top, bottom, top_color, bottom_color, minutes))
+        t = self.typed
+        log.info("%s: words on the rings: %r / %r until %s", self.name, t["top"], t["bottom"],
+                 time.strftime("%H:%M", time.localtime(t["until"])) if t["until"] else "cleared")
 
-    async def clear(self, clock):
-        """Take it off: now if the clock takes it, else as soon as the watcher can."""
-        async with self.lock:
-            self._keep(None, self.on_clock)
-            await self._delete(clock)
-        log.info("%s: words on the rings cleared", clock.name)
+    def clear(self):
+        """Take the typed words off: the words source's go back up, if there are any."""
+        self._save(None)
+        log.info("%s: typed words on the rings cleared", self.name)
 
-    async def _delete(self, clock, sweep=False):
-        """Dark rings, then the slot deleted. With sweep and nothing of ours there, only the delete:
-        anything another program (a bench script) left in the slot."""
-        if not clock.connected or not (self.on_clock or sweep):
-            return
-        try:
-            if self.on_clock:
-                await clock.write(BLANK)
-            await clock.write(DELETE)
-            self._keep(None, False)
-            self.client = clock.client
-        except Exception as e:
-            self.retry_at = time.time() + RETRY_S
-            log.warning("%s: taking the words off failed: %s", clock.name, e)
+    def words(self, now):
+        """(top, bottom, top colour, bottom colour) to show now, or ()."""
+        t = self.typed
+        if t and t["until"] and now >= t["until"]:
+            self._save(None)
+            log.info("%s: typed words on the rings ended", self.name)
+        elif t:
+            return t["top"], t["bottom"], t["top_color"], t["bottom_color"]
+        s = self.said
+        return (s["top"], s["bottom"], *self.colors) if s and now - s["at"] < self.stale_s else ()
 
-
-async def watch(clock):
-    """Take the message off when its minutes are up, and write it again on a new link, after an alert
-    (which takes the face), and every statusring.REFRESH_S while it shows. With nothing showing, a new
-    link also deletes whatever is left in SLOT: a mode-0 leftover would hide the time."""
-    m = clock.message
-    while True:
-        await asyncio.sleep(CHECK_S)
-        if not clock.connected:
-            continue
+    def json(self):
         now = time.time()
-        async with m.lock:
-            if m.showing and m.showing["until"] and now >= m.showing["until"]:
-                m._keep(None, m.on_clock)
-                log.info("%s: words on the rings ended", clock.name)
-            if now < m.retry_at:
-                continue
-            new_link = m.client is not clock.client
-            if not m.showing:
-                if m.on_clock or new_link:
-                    await m._delete(clock, sweep=new_link)
-                continue
-            if statusring.near_alarm(clock, now) or now - clock.last_alert < AFTER_ALERT_S:
-                m.stale = True
-                continue
-            if not new_link and not m.stale and now - m.written < statusring.REFRESH_S:
-                continue
-            try:
-                await clock.write(scene_bytes(grid(m.showing["top"], m.showing["bottom"], m.showing["top_color"],
-                                                   m.showing["bottom_color"])))
-                m.client, m.written, m.stale = clock.client, now, False
-            except Exception as e:
-                m.retry_at = now + RETRY_S
-                log.warning("%s: writing the words again failed: %s", clock.name, e)
+        self.words(now)  # an ended one goes
+        fresh = self.said and now - self.said["at"] < self.stale_s
+        return {"typed": self.typed, "said": {**self.said, "top_color": self.colors[0], "bottom_color": self.colors[1]} if fresh else None,
+                "source": self.source, "error": self.error}
+
+
+def picture(clock, now):
+    return clock.message.words(now)
+
+
+def watch(clock):
+    return statusring.watch(clock, picture, scene_bytes, SLOT, "words", "words")
+
+
+async def run(argv):
+    """The command's output; RuntimeError if it fails or takes over RUN_S. It runs in a process group of
+    its own, stopped as a whole: a child left running would hold the output open."""
+    proc = await asyncio.create_subprocess_exec(*argv, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+                                                stderr=asyncio.subprocess.PIPE, start_new_session=True)
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(), RUN_S)
+    except asyncio.TimeoutError:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        await proc.wait()
+        raise RuntimeError(f"took over {RUN_S} s") from None
+    if proc.returncode:
+        last = (err.decode(errors="replace").strip().splitlines() or [""])[-1][:160]
+        raise RuntimeError(f"exited {proc.returncode}{': ' + last if last else ''}")
+    return out.decode(errors="replace")
+
+
+async def follow(clock, cfg):
+    """Run the words source's command every every_minutes and keep what it says. A bad section is
+    logged and leaves the source off."""
+    m = clock.message
+    try:
+        argv = shlex.split(cfg["command"])
+        argv[0] = os.path.expanduser(argv[0])
+        every = max(1.0, float(cfg.get("every_minutes", EVERY_MINUTES))) * 60
+        m.colors = colour(cfg.get("top_color", COLORS[0])), colour(cfg.get("bottom_color", COLORS[1]))
+        m.stale_s = max(STALE_S, 2 * every)  # a slow source's words last until its next run
+    except (KeyError, IndexError, TypeError, ValueError, AttributeError) as e:
+        log.warning("%s: the [words] section needs command = \"...\" (%s: %s); no words source", clock.name, type(e).__name__, e)
+        return
+    m.source = True
+    while True:
+        try:
+            top, bottom = fit((await run(argv)).splitlines())
+            m.said = {"top": top, "bottom": bottom, "at": time.time()} if top or bottom else None
+            if m.error:
+                log.info("%s: words source works again", clock.name)
+            m.error = None
+        except Exception as e:  # OSError (no such command), RuntimeError (it failed), UnicodeError...
+            why = str(e) or type(e).__name__
+            if why != m.error:
+                log.warning("%s: words source: %s", clock.name, why)
+            m.error = why
+        await asyncio.sleep(min(every, RETRY_S) if m.error else every)
