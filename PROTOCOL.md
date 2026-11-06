@@ -86,7 +86,7 @@ Simple commands, always as four bytes:
 | 45 Sound | `45, 0, 0, n` | plays sound n; `45, 0, 0, 0` stops it; too big an n is refused with 0x84 (seen) |
 | 60, 61 | `60, 0, 0, 0` / `61, 0, 0, 0` | 61 shows the brightness screen, a sun icon and the level, until 60 ends it (seen once, ~16 s, at maximum brightness: "100%") |
 | 70 | `70, 0, 0, 0` | shows an 8-digit hex number, scrolled twice (seen). The first six digits changed between readings; the last byte was 0x64 each time, with the battery at 100 each time (not tried at another level); the rest is unknown |
-| 71 | `71, 0, 0, 0` | shows the plain time screen (time only, rings blank) for ~5 s (seen): the screen that came at the top of the hour with Settings 15 set |
+| 71 | `71, 0, 0, 0` | shows the plain time screen (time only, rings blank) for ~5 s (seen): the screen that came at the top of the hour at 18:00 and 19:00 with Settings 15 set (not checked at 22:00) |
 
 Not to be sent to a clock in use:
 
@@ -117,7 +117,7 @@ Fields not in his proto:
 
 | Field | Type | Meaning |
 |---|---|---|
-| 15 | uint8 | an hourly chime: a sound number for the top of each hour, 0 = off (expected). Seen with 1 set: at 19:00 the plain time screen ~5 s and, in the phone's recording, a ~1 kHz tone just after the hour (found in the audio, not heard by a person). With 6 at 18:00 the same screen but no clear sound. Whether that screen comes every hour without 15 set is unknown |
+| 15 | uint8 | read from the firmware as an hourly chime: a sound number for the top of each hour, with 0 expected to mean off. Seen with 1 set: at 19:00 the plain time screen ~5 s and, in the phone's recording, a ~1 kHz tone just after the hour (found in the audio, not heard by a person). With 6 at 18:00 the same screen but no clear sound. But at 22:00, with 15 read back as 0 at 22:03 and no Settings write in between, a chime was heard by ear (once, not recorded), so the chime probably doesn't need 15 set and what 15 does is unclear. Whether the plain time screen comes every hour without 15 set is unknown |
 | 16 | int32, minutes | a scheduled clock shift: how far to move the clock |
 | 17 | uint32, seconds | when to make that shift, in local wall time written as if UTC (as for scene timestamps) |
 | 18 | int32, minutes | an offset added to the time the clock reads from the central. Changing it moves the clock by the difference at once (seen: +60, then back to 0). Moving back an hour, the hands seemed to go forward 11 hours; the digital time changes at once |
@@ -179,8 +179,9 @@ Firmware 1.5.9 and 1.5.10 alerted at start − reminder (expected). Two extra fi
   - slot 7, header mode 8, `0x7F | 0 << 8 | 95 << 16 | 4 << 24` (the whole day, every hour): at 21:00, 2 s after.
 
   Reading the bytes as a weekday mask (byte 0), a window of the day in 15-minute slots (bytes 1 and 2) and a
-  step in slots (byte 3) fits all four, but hasn't been checked byte by byte (no trial at a time it should
-  skip). In mode 0 the appointments scene never joined the normal rotation; in mode 8 it did, as a screen of
+  step in slots (byte 3) fits all four, but hasn't been checked byte by byte. A step-2 trial (from 22:15)
+  showed no alert at 22:15 (replayed notices were on screen 22:14:50-22:15:27) or at 22:30, and 22:45 wasn't
+  watched, so it proves nothing. In mode 0 the appointments scene never joined the normal rotation; in mode 8 it did, as a screen of
   its own (Hypfer: 0 = alerts only, 8 = alerts and the clock face). A nonzero byte 0 needs a nonzero byte 3,
   or the scene is refused with 0x85 (expected). Probably the app's "Recurring" calendar mode (a guess from
   Glance's help pages).
@@ -207,6 +208,6 @@ The text line decodes **UTF-8** (seen, from notices of four bytes each):
 
 ## Not worked out yet
 
-State bits 0x0004 and 0x2000; command 70's middle digits; whether Settings 15 picks the chime's sound; the exact icons
+State bits 0x0004 and 0x2000; command 70's middle digits; what Settings 15 does (the hourly chime sounds without it); the exact icons
 behind control bytes 0x14-0x1D; how the built-in demo, hand calibration and pairing screens are triggered,
 and what the reset button does; how night mode uses the light sensor beyond hiding the dots (seen: with night mode on and the lights off, the 12 dots went out within ~50 s and stayed out for the 20 s watched after the lights came back; any dimming can't be judged on an auto-exposed camera); what Settings 13 changes (nothing seen with night mode on either).
