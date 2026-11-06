@@ -16,6 +16,13 @@ address = "AA:BB:CC:DD:EE:FF"   # bluetoothctl devices, after pairing (see READM
 # animation_screen = false      # start with the animation screen (burn-in fire, holidays) off
 # screensaver = true            # start with the screensaver screen (a different animation each turn) on
 
+# Optional: Claude's face, a screen showing how your Claude Code sessions are doing. It needs a session
+# tracker you write: a Python file, run inside the bridge, with a SessionRing class whose refresh(now)
+# (now in epoch seconds) sets .counts to how many sessions are in "error", "waiting", "waitingSeen",
+# "done" and "running", say from files your Claude Code hooks write (see claudeface.py).
+# [clocks.office.claude_face]
+# tracker = "~/claude-sessions/sessionring.py"
+
 # Optional: alert on emails in a Thunderbird inbox (its local mbox file).
 [clocks.office.mail]
 inbox = "~/.thunderbird/xxxxxxxx.default-release/ImapMail/imap.example.com/INBOX"

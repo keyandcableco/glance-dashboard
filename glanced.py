@@ -21,6 +21,7 @@ from bleak import BleakClient
 from bless import BlessServer, GATTAttributePermissions, GATTCharacteristicProperties
 
 import animscreen
+import claudeface
 import brain
 import calendars
 import calwatch
@@ -728,7 +729,7 @@ def make_app(clocks, shop_url=None):
         return web.json_response(pick(request).screens.json())
 
     async def set_screens(request):
-        """{"status", "forecast", "schedule", "animation", "screensaver": true or false}; each screen's watcher puts
+        """{"status", "forecast", "schedule", "animation", "screensaver", "claude": true or false}; each screen's watcher puts
         it on or takes it off the clock within half a minute (later if an alert is showing)."""
         body = await read_body(request)
         clock = pick(request, body)
@@ -833,13 +834,15 @@ async def main():
         clock = clocks[name] = Clock(name, c["address"])
         clock.nudges = nudges.Settings(name, c.get("nudges"))
         clock.screens = screens.Screens(name, c)
+        clock.claude_tracker = claudeface.tracker(c)
         clock.calendars = calendars.Calendars(name, c)
         clock.message = ringwords.Message(name)
         watchers = {"connection": clock.keep_connected, "resync": clock.resync, "replay": lambda clock=clock: unread.replay(clock),
                     "pickups": lambda clock=clock: pickups.watch(clock), "nudges": lambda clock=clock: nudges.watch(clock),
                     "ring": lambda clock=clock: statusring.watch(clock), "schedule": lambda clock=clock: schedulering.watch(clock),
                     "animation": lambda clock=clock: animscreen.watch(clock),
-                    "screensaver": lambda clock=clock: screensaver.watch(clock), "words": lambda clock=clock: ringwords.watch(clock)}
+                    "screensaver": lambda clock=clock: screensaver.watch(clock), "words": lambda clock=clock: ringwords.watch(clock),
+                    "claude": lambda clock=clock: claudeface.watch(clock)}
         if "mail" in c:
             watchers["mail"] = lambda clock=clock, c=c: mailwatch.watch(clock, c["mail"])
         if "texts" in c:
