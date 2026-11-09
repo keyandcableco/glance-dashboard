@@ -3,18 +3,24 @@ doing, as an emoji face drawn on the rings, with eyebrows of steady pips on the 
 session that needs you and you haven't looked at, in its state's colour: errors and waiting ones over the
 left eye, finished ones over the right.
 
-  a turn died on an error        a dizzy face in red, x eyes and an open mouth        a red pip each
-  a session waits on you         wide eyes and an O mouth; it blinks                  an orange pip each
-  one finished since you looked  a smile; it winks                                    a green pip each
-  sessions working               a flat mouth, eyes looking right, left, up; a blink  no pip
-  only ones you've seen waiting  a flat mouth, a slow blink                           no pip
+  a turn died on an error        red: dizzy, frowning, crying or sobbing               a red pip each
+  a session waits on you         wide eyes and an O, a frown, a tear, or eyes          an orange pip each
+                                 looking round for you; they blink
+  one finished since you looked  happy: a winking smile, a grin, laughing, heart or    a green pip each
+                                 star eyes, tongue out, sunglasses, blushing
+  sessions working               busy: eyes looking around over a flat mouth or a      no pip
+                                 smile, sunglasses on, tongue out in concentration
+  only ones you've seen waiting  patient: a slow blink, a side-eye, dozing             no pip
   none of these                  the screen leaves the turn (its slot deleted)
 
-The first of these there is picks the face. Waiting sessions you've already looked at come last: a
-tracker may keep them for days, and ahead of the others they'd hide the smile and the looking around.
+The first of these there is picks the mood, and within it a face is picked at random every VARY_S, never
+the one shown last, so the screen looks different most times it comes round: one face a mood got boring.
+Waiting sessions you've already looked at come last: a tracker may keep them for days, and ahead of the
+others they'd hide the happy faces and the looking around.
 Pips only for what needs you: one for every session, seen and working ones too, was too many to read.
 In one row across 12 o'clock they were nearly eyebrows already; split over the eyes they read as them.
-A brow holds MAX_BROW; one with none leaves the other raised.
+A brow holds MAX_BROW; one with none leaves the other raised. The heart and star eyes reach the outer
+ring under the brows; the pips draw over them.
 
 The states come from a session tracker, a Python file run inside the bridge, set per clock in
 config.toml ([clocks.<name>.claude_face] tracker = ..., a relative path from this folder). It defines a
@@ -25,13 +31,15 @@ leaves the face off and is logged once.
 
 It's a saved scene in watch-face mode, SLOT, kept drawn by statusring.watch like the other screens (never
 during an alert or a countdown's alarm), and switched on and off on the panel as the "claude" screen. The
-moves are timed objects, which play once each time the screen comes round. Every face was tried on the
-clock and drew as drawn, and the blink and wink kept their times.
+moves are timed objects, which play once each time the screen comes round. The drawings are the set tried
+on the clock, where each drew as drawn and the blinks and winks kept their times; a few faces here put two
+of them together (pupils with an O or a smile, sunglasses with a flat mouth).
 """
 import importlib.util
 import logging
 import math
 import os
+import random
 import time
 from pathlib import Path
 
@@ -50,6 +58,7 @@ BROW = 41  # the outer ring's LED over the left eye's middle; the right brow is 
 MAX_BROW = 4  # pips a brow
 HERE = Path(__file__).parent
 REFRESH_S = 10  # how often the tracker's files are looked at again
+VARY_S = 60  # a new face from the mood's set this often: about once a turn of the screens
 SECOND = 50  # frames
 
 
@@ -73,10 +82,24 @@ RIGHT_EYE = [(r, 47 - p) for r, p in LEFT_EYE]
 EYES = LEFT_EYE + RIGHT_EYE
 SHUT = mirror(cells([2], [39, 40, 41, 42, 43]))  # an arc along a ring bows outward, like a closed eye
 LEFT_SHUT = SHUT[:len(SHUT) // 2]
+HAPPY = mirror(cells([1], [39, 40, 41, 42, 43]))  # the same arc on the eye's outer ring: ^ ^
+CROSSES = mirror([(1, 41), (2, 40), (2, 41), (2, 42), (3, 41)])  # a + on the rings shows as an x at 10:30
+# the rings turn a grid 45 degrees at 10:30, so shapes that must stay upright are picked cell by cell
+HEARTS = mirror([(0, 41), (1, 40), (1, 41), (1, 42), (2, 40), (2, 41), (2, 42), (2, 43), (3, 40), (3, 41), (3, 42)])
+STARS = mirror([(0, 42), (1, 40), (1, 41), (1, 42), (2, 40), (2, 41), (2, 42), (3, 41)])  # five-pointed, pale gold
+SHADES = mirror(cells([1, 2, 3], [39, 40, 41, 42, 43]) + cells([3], [44, 45, 46, 47]))  # and the bridge between
 SMILE = cells([1], range(18, 30)) + mirror([(2, 16), (2, 17)])  # along a ring the ends turn up
+GRIN = cells([3, 2], range(18, 30)) + cells([1], range(20, 28)) + cells([0], range(22, 26))  # open, flat on top
 O = [(0, 23), (0, 24), (1, 22), (1, 25), (2, 22), (2, 25), (3, 23), (3, 24)]  # hollow, four rings tall
 FLAT = cells([3], range(21, 27))
-CROSSES = mirror([(1, 41), (2, 40), (2, 41), (2, 42), (3, 41)])  # a + on the rings shows as an x at 10:30
+FROWN = mirror([(0, 19), (0, 20), (1, 20), (1, 21), (2, 21), (2, 22), (3, 22), (3, 23)])  # each step shares an
+# LED with the next: one LED a step drew as a zigzag
+WAIL = cells([1, 2, 3], [22, 23, 24, 25])
+LIPS = cells([2], range(18, 30))  # a straight mouth for the tongue to hang from
+TONGUE = cells([0, 1], [22, 23, 24, 25])
+TEAR = cells([2, 3], [37, 38])  # under the left eye
+STREAMS = mirror(cells([3], range(31, 39)))  # down the inner ring from both eyes
+CHEEKS = mirror(cells([2, 3], [31, 32]))
 
 
 def pupil(eye, dx, dy):
@@ -91,19 +114,72 @@ def looking(dx, dy):
     return [(EYES, SKIN), ([pupil(LEFT_EYE, dx, dy), pupil(RIGHT_EYE, dx, dy)], "Black")]
 
 
-FACES = {  # the face drawn first, then (seconds, what changes) played once per turn
-    "error": ([(CROSSES, "Red"), (O, "Red")], []),
-    "waiting": ([(EYES, SKIN), (O, SKIN)],
-                [(3, [(EYES, "Black"), (SHUT, SKIN)]), (3.2, [(SHUT, "Black"), (EYES, SKIN)]),
-                 (9, [(EYES, "Black"), (SHUT, SKIN)]), (9.2, [(SHUT, "Black"), (EYES, SKIN)])]),
-    "waitingSeen": ([(EYES, SKIN), (FLAT, SKIN)],
-                    [(6, [(EYES, "Black"), (SHUT, SKIN)]), (6.3, [(SHUT, "Black"), (EYES, SKIN)])]),
-    "done": ([(EYES, SKIN), (SMILE, SKIN)],
-             [(3, [(LEFT_EYE, "Black"), (LEFT_SHUT, SKIN)]), (3.6, [(LEFT_SHUT, "Black"), (LEFT_EYE, SKIN)])]),
-    "running": ([(FLAT, SKIN)] + looking(0, 0),
-                [(2.5, looking(18, 0)), (4.5, looking(-18, 0)), (6.5, looking(0, 18)), (8.5, looking(0, 0)),
-                 (10, [(EYES, "Black"), (SHUT, SKIN)]), (10.2, [(SHUT, "Black")] + looking(0, 0))]),
+def blink(t, opened=None, held=0.2, skin=SKIN):
+    """Moves: the eyes shut at t seconds and open again, as `opened`, `held` seconds later."""
+    return [(t, [(EYES, "Black"), (SHUT, skin)]), (t + held, [(SHUT, "Black")] + (opened or [(EYES, skin)]))]
+
+
+def wink(t):
+    return [(t, [(LEFT_EYE, "Black"), (LEFT_SHUT, SKIN)]), (t + 0.6, [(LEFT_SHUT, "Black"), (LEFT_EYE, SKIN)])]
+
+
+def glancing(*spots):
+    """Moves: the eyes looking at each (seconds, dx, dy) in turn."""
+    return [(t, looking(dx, dy)) for t, dx, dy in spots]
+
+
+LOOK_ROUND = glancing((2.5, 18, 0), (4.5, -18, 0), (6.5, 0, 18), (8.5, 0, 0)) + blink(10, looking(0, 0))
+DARTING = glancing((1.5, -18, 0), (3, 18, 0), (4.5, -18, 0), (6, 18, 0), (7.5, 0, 0)) + blink(9, looking(0, 0))
+RED = "Red"
+
+FACES = {  # each mood's faces: (what, the face drawn first, (seconds, what changes) played once per turn)
+    "error": [
+        ("dizzy", [(CROSSES, RED), (O, RED)], []),
+        ("frowning", [(EYES, RED), (FROWN, RED)], blink(3, skin=RED) + blink(9, skin=RED)),
+        ("crying", [(EYES, RED), (FROWN, RED), (TEAR, "SkyBlue")], []),
+        ("sobbing", [(SHUT, RED), (WAIL, RED), (STREAMS, "SkyBlue")], []),
+    ],
+    "waiting": [
+        ("wide eyes, O", [(EYES, SKIN), (O, SKIN)], blink(3) + blink(9)),
+        ("frowning", [(EYES, SKIN), (FROWN, SKIN)], blink(3) + blink(9)),
+        ("a tear", [(EYES, SKIN), (FROWN, SKIN), (TEAR, "SkyBlue")], blink(5)),
+        ("looking round for you", [(O, SKIN)] + looking(0, 0), DARTING),
+    ],
+    "done": [
+        ("smile, wink", [(EYES, SKIN), (SMILE, SKIN)], wink(3)),
+        ("grin", [(EYES, SKIN), (GRIN, SKIN)], blink(3) + blink(9)),
+        ("laughing", [(HAPPY, SKIN), (GRIN, SKIN)], []),
+        ("heart eyes", [(HEARTS, RED), (SMILE, SKIN)], []),
+        ("star eyes", [(STARS, "Google26"), (GRIN, SKIN)], []),
+        ("wink, tongue out", [(RIGHT_EYE + LEFT_SHUT, SKIN), (LIPS, SKIN), (TONGUE, RED)], []),
+        ("sunglasses", [(SHADES, "Blue"), (SMILE, SKIN)], []),
+        ("blushing", [(HAPPY, SKIN), (SMILE, SKIN), (CHEEKS, "MediumVioletRed")], []),
+    ],
+    "running": [
+        ("looking around", [(FLAT, SKIN)] + looking(0, 0), LOOK_ROUND),
+        ("smiling, looking around", [(SMILE, SKIN)] + looking(0, 0), LOOK_ROUND),
+        ("sunglasses on", [(SHADES, "Blue"), (FLAT, SKIN)], []),
+        ("tongue out, concentrating", [(LIPS, SKIN), (TONGUE, RED)] + looking(0, -18),
+         glancing((2.5, -18, 0), (5, 0, -18), (7.5, 18, 0), (10, 0, -18))),
+    ],
+    "waitingSeen": [
+        ("slow blink", [(EYES, SKIN), (FLAT, SKIN)], blink(6, held=0.3)),
+        ("side-eye", [(FLAT, SKIN)] + looking(-18, 0), blink(6, looking(-18, 0), held=0.3)),
+        ("dozing", [(SHUT, SKIN), (FLAT, SKIN)],
+         [(5, [(SHUT, "Black"), (EYES, SKIN)]), (6.5, [(EYES, "Black"), (SHUT, SKIN)])]),
+    ],
 }
+
+CHOSEN = {}  # (clock name, mood): (the VARY_S period it was picked in, its index in FACES)
+
+
+def variant(name, state, now):
+    """Which of the mood's faces to show: a new one at random each VARY_S, never the one shown last."""
+    period, was = int(now // VARY_S), CHOSEN.get((name, state))
+    if was is None or was[0] != period:
+        choices = [i for i in range(len(FACES[state])) if was is None or i != was[1]] or [0]
+        CHOSEN[(name, state)] = (period, random.choice(choices))
+    return CHOSEN[(name, state)][1]
 
 
 def segments(layers):
@@ -128,8 +204,8 @@ def pips(left, right):
 
 
 def scene_bytes(want):
-    state, (left, right) = want
-    face, moves = FACES[state]
+    state, which, (left, right) = want
+    _, face, moves = FACES[state][which]
     scene, obj = pb.CustomScene(), pb.CustomScene.Object
     scene.object.add(method=obj.Fill, lifeTime=statusring.LIFETIME, result=obj.OK).fill.segment.extend(
         segments(face + [([(0, p)], PIP_COLORS[s]) for p, s in pips(left, right)]))
@@ -179,7 +255,7 @@ def picture(clock, now):
     if not path:
         return ()
     states = TRACKERS.setdefault(path, Sessions(path)).states(now)
-    return (states[0], brows(states)) if states else ()
+    return (states[0], variant(clock.name, states[0], now), brows(states)) if states else ()
 
 
 def watch(clock):
@@ -189,9 +265,9 @@ def watch(clock):
 if __name__ == "__main__":  # print each face's size, and the states the tracker sees now
     import sys
     for state in ORDER:
-        for n in (0, MAX_BROW):
-            data = scene_bytes((state, (("error",) * n, ("done",) * n)))
-            print(f"{state:11} {2 * n} pips {len(data):3} B")
+        for which, (what, _, _) in enumerate(FACES[state]):
+            sizes = [len(scene_bytes((state, which, (("error",) * n, ("done",) * n)))) for n in (0, MAX_BROW)]
+            print(f"{state:11} {what:26} {sizes[0]:3} B, {sizes[1]:3} B with {2 * MAX_BROW} pips")
     if len(sys.argv) > 1:
         states = Sessions(sys.argv[1]).states(time.time())
         print(states, "brows:", brows(states))

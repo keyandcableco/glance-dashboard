@@ -51,11 +51,13 @@ of his `Glance.proto`, fixed so `protoc` accepts it. Everything here builds on t
   and fog; drawn ones where every LED has its own colour (a rainbow with a wave over it, confetti, a
   sweep, a rainbow painting itself in).
 - **Claude's face** (with a session tracker set up, see `config.example.toml`): an emoji face on the
-  rings for your Claude Code sessions: dizzy and red when a turn died on an error, wide-eyed and blinking
-  when one waits on you, a winking smile when one finished since you last looked, eyes looking around
-  while they work, and eyebrows of pips, one for each session that needs you and you haven't looked at
-  yet (errors and waiting ones over the left eye, finished ones over the right). Nothing to show, no
-  screen.
+  rings for your Claude Code sessions, a different one from its mood's set every minute: red (dizzy,
+  frowning, crying, sobbing) when a turn died on an error; wide-eyed, frowning, teary or looking round for
+  you when one waits on you; happy (a winking smile, a grin, laughing, heart or star eyes, tongue out,
+  sunglasses, blushing) when one finished since you last looked; busy (eyes looking around, sunglasses on,
+  tongue out in concentration) while they work; and eyebrows of pips, one for each session that needs
+  you and you haven't looked at yet (errors and waiting ones over the left eye, finished ones over the
+  right). Nothing to show, no screen.
 - **Words on the rings**: a screen of two lines drawn in letters round the four rings (a 3×4 font, about
   6 letters a half; the bottom line is turned over so it reads upright). It says what a words source says:
   a command of your own, run every few minutes, that prints the few words that matter (your next to-do,
