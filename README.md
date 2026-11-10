@@ -217,7 +217,9 @@ The full reference, with every command, error code and setting found so far, is 
   area (`flashLight.color`, `speed`). Like any scene it's saved and keeps cycling, so delete its slot
   after it has played.
 - The clock reads the Current Time Service from the central when it connects, and only then, so the
-  bridge drops its link once a night (3:30, after a daylight-saving change) and reconnects to set the time.
+  bridge drops its link once after a daylight-saving change (between 3:30 and 6 that night) and
+  reconnects to set the time. It used to do this every night, until a drop left the shop clock
+  switched off.
 - A short-lived second BLE client to the same clock (a one-off script like `set_setting.py`) drops the
   bridge's link when it disconnects; the bridge reconnects within seconds.
 

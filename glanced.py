@@ -51,7 +51,7 @@ TIMER, TIMER_STOP = 3, 10
 FLASH_S = 3.5  # the light flash runs 3 s; its scene is deleted after
 SOUND = 45  # [45, 0, 0, n] plays the clock's sound n, [45, 0, 0, 0] stops it
 SOUND_S = 5  # a played sound is stopped after this, since not every sound may end by itself
-RESYNC_AT, RESYNC_BY = datetime.time(3, 30), datetime.time(6)  # nightly, after a 2 am daylight-saving change
+RESYNC_AT, RESYNC_BY = datetime.time(3, 30), datetime.time(6)  # the night after a 2 am daylight-saving change
 PASSWORD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "panel_password")
 LOCAL = ("127.0.0.1", "::1")
 CTS_SERVICE = "00001805-0000-1000-8000-00805f9b34fb"
@@ -68,6 +68,12 @@ def current_time_bytes():
         now.hour, now.minute, now.second, now.isoweekday(),
         now.microsecond * 256 // 1_000_000, 0,
     ])
+
+
+def utc_offset():
+    """The local UTC offset now; it changes at a daylight-saving change. From time.localtime, which
+    knows which pass of the repeated fall-back hour it is in (a naive datetime doesn't)."""
+    return datetime.timedelta(seconds=time.localtime().tm_gmtoff)
 
 
 def local_time_info_bytes():
@@ -133,7 +139,7 @@ class Clock:
         self.flashing = asyncio.Lock()  # one flash and its notice at a time: flashes share one slot
         self.sound_stop = None  # the task that stops a played sound
         self.sounding = asyncio.Lock()  # one play or stop at a time, so a stop never cuts the next sound short
-        self.linked_at = None  # when the link was made: the clock read the time then
+        self.linked_offset = None  # the UTC offset when the link was made: the clock read the time then
 
     async def countdown(self, due, owner, text):
         """Ask for a ring countdown to `due` for unread item `owner`. The clock has one ring
@@ -202,7 +208,7 @@ class Clock:
                 self.client = BleakClient(self.addr, disconnected_callback=lambda _: self.lost.set())
                 await self.client.connect()
                 log.info("%s: connected to %s", self.name, self.addr)
-                self.linked_at = datetime.datetime.now()
+                self.linked_offset = utc_offset()
                 with contextlib.suppress(Exception):  # a flash cut off by a lost link would keep strobing
                     await self.write(bytes([statusring.SCENES_DELETE, 0, 0, statusring.FLASH_SLOT]))
                 await self.lost.wait()
@@ -212,22 +218,27 @@ class Clock:
             await asyncio.sleep(5)
 
     async def resync(self):
-        """Once a night drop the link so the clock reconnects and reads the time again: it reads it only
-        on a fresh connection, and the link can stay up for weeks, through a daylight-saving change."""
+        """After a daylight-saving change drop the link once, so the clock reconnects and reads the time
+        again: it reads it only on a fresh connection, and the link can stay up for weeks. Only then,
+        not every night: on 2026-11-10 the shop clock switched itself off within a minute of a nightly
+        drop and stayed off until its button was held."""
+        tried_on = None  # one drop a night at most, even one that failed or left the link up
         while True:
             await asyncio.sleep(60)
             now = datetime.datetime.now()
-            due = datetime.datetime.combine(now.date(), RESYNC_AT)
-            if not RESYNC_AT <= now.time() < RESYNC_BY or not self.connected or (self.linked_at or now) >= due:
+            if not RESYNC_AT <= now.time() < RESYNC_BY or not self.connected or tried_on == now.date():
                 continue
+            if self.linked_offset is None or self.linked_offset == utc_offset():
+                continue  # the clock read the time at today's offset
             if statusring.busy(self, time.time()) or statusring.counting_down(self, time.time()):
                 continue  # a countdown might not survive the drop: wait for it to end
-            log.info("%s: dropping the link so the clock reads the time again", self.name)
+            log.info("%s: dropping the link so the clock reads the time again after a daylight-saving change",
+                     self.name)
+            tried_on = now.date()
             try:
                 await asyncio.wait_for(self.client.disconnect(), 30)
             except Exception as e:
                 log.warning("%s: dropping the link failed: %s", self.name, str(e) or type(e).__name__)
-                self.linked_at = now  # not again tonight
 
     @staticmethod
     def notice(text, color="Lime", anim="Pulse", sound="Radar", mode="Repeat", priority="high", strict=False):
