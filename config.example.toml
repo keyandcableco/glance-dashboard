@@ -76,12 +76,15 @@ pause_minutes = 10
 # light flash every 10 minutes for 2 hours, then quietly in the unread list) until you say they're done:
 # "hey glance, took my meds", or Clear on the panel. Clearing everything leaves them alone; "cancel" skips
 # one. Done on one clock clears it on all. "Did I take my meds?" says what's logged today (checkins.json).
+# Easier: the panel's Daily reminders card. Once you change one there, these tables no longer count.
 # [[checkins]]
-# name = "MEDS"                  # what the clock shows
+# name = "MEDS"                  # its name in the log and the replies
+# text = "TAKE YOUR MEDS"        # what the clock shows (default: the name)
 # times = ["08:00", "20:00"]     # 24-hour
 # words = ["meds", "pills"]      # what you call it out loud
 # clocks = ["office"]            # which clocks ask (default: all)
 # sound = "Shine"                # the nag's sound
+# on = true                      # false: kept, but doesn't ask
 
 # A second clock with nothing but what you send it.
 # [clocks.kitchen]

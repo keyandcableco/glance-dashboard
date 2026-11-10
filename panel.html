@@ -197,6 +197,12 @@
   .opt input:checked + span { background: var(--ink); border-color: var(--ink); color: var(--page); }
   .opt input:focus-visible + span { outline: 2px solid var(--ink); outline-offset: 2px; }
   .snooze { display: flex; align-items: center; gap: 10px; min-height: 28px; font-weight: 500; }
+  .citimes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+  .citime { display: flex; gap: 6px; }
+  .citime input { width: 9.5em; }
+  .citimes .chip { min-height: 46px; }
+  .btn[hidden] { display: none; }
+  .caps:not(:placeholder-shown) { text-transform: uppercase; }  /* as the clock will show it */
   .snooze .cled.on { background: var(--on); } .snooze .cled.warn { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
 
   /* brightness: an LED bar */
@@ -442,6 +448,31 @@
         </div>
         <p class="hint">"Wrap up" 30 minutes before closing, "Closing time" at it. Timers, pickups and hard stops you set aren't affected by any of this.</p>
         <div class="actions end"><button class="btn primary" id="saveNudges">Save nudges</button></div>
+      </section>
+
+      <section class="panel" id="secCheckins" aria-labelledby="hCheckins">
+        <div class="sh"><h2 class="dm" id="hCheckins" data-dm="DAILY REMINDERS">Daily reminders</h2><span class="count" id="ciCount"></span></div>
+        <ul class="list" id="checkins"></ul>
+        <div class="sub" id="ciHead">Add a reminder</div>
+        <div class="fields half">
+          <label class="field">Name <input type="text" id="ciName" class="caps" maxlength="24" placeholder="MEDS" autocomplete="off"></label>
+          <label class="field">Clock shows <input type="text" id="ciText" class="caps" maxlength="40" placeholder="The name" autocomplete="off"></label>
+        </div>
+        <div class="field" style="margin-top:14px">Times every day
+          <div class="citimes" id="ciTimes"></div>
+        </div>
+        <label class="field" style="margin-top:14px">Words you'd say, commas between <input type="text" id="ciWords" placeholder="meds, pills" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+        <div class="fields half" style="margin-top:14px">
+          <div class="field">Sound <span class="selplay"><span class="sel"><select id="ciSound" aria-label="Reminder sound"></select></span><button type="button" class="btn play" id="ciSoundPlay" disabled></button></span></div>
+          <div class="field">Clocks that ask <div class="opts" id="ciClocks" role="group" aria-label="Clocks that ask"></div></div>
+        </div>
+        <div class="actions">
+          <button class="btn ghost" id="ciDelete" hidden>Delete</button>
+          <button class="btn" id="ciCancel" hidden>Cancel</button>
+          <span class="grow"></span>
+          <button class="btn primary" id="ciSave">Add reminder</button>
+        </div>
+        <p class="hint">At each time the clock shows it with the light flash and its sound, again every 10 minutes for 2 hours, then waits in Unread. Say &ldquo;hey glance, took my meds&rdquo; (any of its words, or its name) or clear it in Unread to log it done; Clear all leaves it. Changes take effect at once and stay on this computer; once you change one here, the [[checkins]] in config.toml no longer count.</p>
       </section>
     </div>
 
@@ -977,6 +1008,7 @@ async function loadOptions() {
     const o = await api("/options");
     fill($("color"), o.colors, "Lime"); fill($("anim"), o.animations, "Pulse");
     fill($("sound"), o.sounds, "NoneSound"); fill($("priority"), o.priorities, "high"); soundButton(false);
+    fill($("ciSound"), o.sounds, $("ciSound").value || CI_SOUND); ciSoundButton(false);
     $("icons").innerHTML = o.icons.map(i => `<button type="button" class="ichip" data-icon="${esc(i)}" title="Insert {${esc(i)}}">${dmSVG(`{${i}}`, 1.75, .78)}<span>${esc(i)}</span></button>`).join("");
     looks();
     RW_FONT = o.ring_font || null; rwPreview(); drawFace();
@@ -986,7 +1018,7 @@ async function loadOptions() {
 $("unread").addEventListener("click", async e => {
   const b = e.target.closest("[data-id]"); if (!b) return;
   try { await api("/unread/clear", { id: b.dataset.id }); } catch (err) { toast("Not cleared: " + err.message, true); }
-  loadUnread();
+  loadUnread(); loadCheckins();  // clearing a daily reminder logs it done
 });
 $("clearAll").onclick = async () => {
   try { await api("/unread/clear", {}); } catch (err) { toast("Not cleared: " + err.message, true); }
@@ -1046,29 +1078,32 @@ $("prevRing").addEventListener("animationend", e => { if (e.animationName === "f
 // the play button beside Sound: the clock plays it, and the bridge stops it after a few seconds
 const PLAY = '<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M3 1.5v9l7.5-4.5z" fill="currentColor"/></svg>';
 const STOP = '<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="2" y="2" width="8" height="8" rx="1" fill="currentColor"/></svg>';
-let soundEnds = 0;
-function soundButton(playing) {
-  const b = $("soundPlay");
-  clearTimeout(soundEnds);
-  b.innerHTML = playing ? STOP : PLAY;
-  b.classList.toggle("on", playing);
-  b.setAttribute("aria-label", playing ? "Stop the sound" : "Play this sound on the clock");
-  b.title = playing ? "Stop" : "Play on the clock";
-  b.disabled = !playing && $("sound").value === "NoneSound";
+function soundPlayer(b, sel) {  // wires a play button to its sound list; returns show(playing)
+  let ends = 0;
+  const show = playing => {
+    clearTimeout(ends);
+    b.innerHTML = playing ? STOP : PLAY;
+    b.classList.toggle("on", playing);
+    b.setAttribute("aria-label", playing ? "Stop the sound" : "Play this sound on the clock");
+    b.title = playing ? "Stop" : "Play on the clock";
+    b.disabled = !playing && sel.value === "NoneSound";
+  };
+  b.onclick = async () => {
+    const playing = b.classList.contains("on");
+    try {
+      const r = await api("/sound", { sound: playing ? "NoneSound" : sel.value });
+      show(!playing);
+      if (!playing) ends = setTimeout(() => show(false), (r.seconds || 5) * 1000);
+    } catch (e) { show(false); toast("Didn't play: " + e.message, true); }
+  };
+  sel.addEventListener("change", () => {
+    if (b.classList.contains("on")) api("/sound", { sound: "NoneSound" }).catch(() => {});
+    show(false);
+  });
+  show(false);
+  return show;
 }
-$("soundPlay").onclick = async () => {
-  const playing = $("soundPlay").classList.contains("on");
-  try {
-    const r = await api("/sound", { sound: playing ? "NoneSound" : $("sound").value });
-    soundButton(!playing);
-    if (!playing) soundEnds = setTimeout(() => soundButton(false), (r.seconds || 5) * 1000);
-  } catch (e) { soundButton(false); toast("Didn't play: " + e.message, true); }
-};
-$("sound").addEventListener("change", () => {
-  if ($("soundPlay").classList.contains("on")) api("/sound", { sound: "NoneSound" }).catch(() => {});
-  soundButton(false);
-});
-soundButton(false);
+const soundButton = soundPlayer($("soundPlay"), $("sound"));
 
 $("send").onclick = async () => {
   const text = $("text").value.trim(); if (!text) return toast("Type some text first", true);
@@ -1466,13 +1501,128 @@ $("saveNudges").onclick = async () => {
   } catch (e) { toast("Not saved: " + e.message, true); }
 };
 
+// ---- daily reminders (GET/POST /checkins, checkins.py): the same on every clock, so not per clock ----
+const CI_SOUND = "Shine";  // pickups.KINDS["checkin"]["due_sound"]
+const CROSS = '<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+const CI_SAID = { taken: s => "taken" + (s.at ? " at " + clockTime(s.at) : ""), skipped: () => "skipped", missed: () => "missed",
+  open: s => s.day ? "waiting (yesterday's)" : "waiting", later: () => "later", none: () => "not asked" };
+const hmTime = hm => clockTime(new Date(`2000-01-01T${hm}`) / 1000);
+const ciSoundButton = soundPlayer($("ciSoundPlay"), $("ciSound"));
+let ciEditing = null;  // the name of the reminder in the form, or null for a new one
+
+function ciToday(c) {
+  if (!c.on) return "Off: it doesn't ask";
+  const parts = c.today.map(s => { const said = `${hmTime(s.time)} ${CI_SAID[s.state](s)}`;
+    return s.state === "open" || s.state === "missed" ? `<span class="late">${said}</span>` : said; });
+  if (c.extra.length) parts.push("also logged at " + c.extra.map(clockTime).join(", "));
+  return "Today: " + parts.join(" · ");
+}
+function renderCheckins(r) {  // what GET /checkins says, or null when it can't be read
+  S.ci = r;
+  if (!r) { $("ciCount").textContent = ""; $("checkins").innerHTML = `<li class="empty">Unknown: the bridge isn't answering.</li>`; return; }
+  const box = $("ciClocks");
+  if (box.dataset.names !== r.clocks.join("\n")) {  // keep what's ticked; all ticked at first
+    const was = box.dataset.names ? new Set([...box.querySelectorAll("input:checked")].map(b => b.value)) : null;
+    box.dataset.names = r.clocks.join("\n");
+    box.innerHTML = r.clocks.map(n => `<label class="opt"><input type="checkbox" value="${esc(n)}"${!was || was.has(n) ? " checked" : ""}><span>${esc(n)}</span></label>`).join("");
+  }
+  $("ciCount").textContent = r.checkins.filter(c => c.on).length || "";
+  $("checkins").innerHTML = r.checkins.length ? r.checkins.map(c => `
+    <li class="item${c.on ? "" : " off"}">
+      <span class="chipled">${ledChip("SkyBlue")}</span>
+      <div class="itext"><div class="t">${esc(c.name)}</div>
+        ${c.text ? `<div class="d">Clock shows ${richText(c.text)}</div>` : ""}
+        <div class="meta">${c.times.map(hmTime).join(", ")} · ${esc(c.clocks.join(", "))} · ${esc(c.sound || CI_SOUND)}</div>
+        <div class="meta">${ciToday(c)}</div></div>
+      <input type="checkbox" class="switch" data-ci-on="${esc(c.name)}"${c.on ? " checked" : ""} aria-label="${esc(c.name)} asks">
+      <button class="btn sm" data-ci-edit="${esc(c.name)}" aria-label="Edit: ${esc(c.name)}">Edit</button>
+    </li>`).join("") : `<li class="empty">No daily reminders yet.</li>`;
+}
+async function loadCheckins() {
+  let r = null;
+  try { r = await api("/checkins"); } catch {}
+  renderCheckins(r);
+}
+async function ciSend(list) {  // the whole list, as it's to be; the bridge checks it all before changing anything
+  let r;
+  try { r = await api("/checkins", { checkins: list.map(({ today, extra, ...c }) => c), rev: S.ci.rev }); }
+  catch (e) { if (e.status === 409) loadCheckins(); throw e; }  // another panel saved since: show theirs
+  renderCheckins(r);
+  return r;
+}
+const ciTimeRow = t => `<span class="citime"><input type="time" value="${esc(t)}" aria-label="Time"><button type="button" class="btn play" data-ci-drop aria-label="Remove this time" title="Remove">${CROSS}</button></span>`;
+function ciForm(c) {  // fill the form with a reminder to edit, or empty for a new one
+  ciEditing = c ? c.name : null;
+  $("ciHead").textContent = c ? `Edit ${c.name}` : "Add a reminder";
+  $("ciName").value = c ? c.name : ""; $("ciText").value = c ? c.text : ""; $("ciWords").value = c ? c.words.join(", ") : "";
+  $("ciTimes").innerHTML = (c ? c.times : [""]).map(ciTimeRow).join("") + `<button type="button" class="chip" id="ciAddTime">+ Time</button>`;
+  $("ciClocks").querySelectorAll("input").forEach(b => b.checked = !c || c.clocks.includes(b.value));
+  if ($("ciSound").options.length) { $("ciSound").value = c && c.sound || CI_SOUND; ciSoundButton(false); }
+  $("ciSave").textContent = c ? "Save reminder" : "Add reminder";
+  $("ciDelete").hidden = $("ciCancel").hidden = !c;
+}
+$("ciTimes").addEventListener("click", e => {
+  if (e.target.closest("#ciAddTime")) {
+    $("ciAddTime").insertAdjacentHTML("beforebegin", ciTimeRow(""));
+    [...$("ciTimes").querySelectorAll("input")].pop().focus();
+  }
+  const d = e.target.closest("[data-ci-drop]");
+  if (d) { if ($("ciTimes").querySelectorAll(".citime").length > 1) d.parentElement.remove(); else d.previousElementSibling.value = ""; }
+});
+$("checkins").addEventListener("click", e => {
+  const b = e.target.closest("[data-ci-edit]"); if (!b || !S.ci) return;
+  ciForm(S.ci.checkins.find(c => c.name === b.dataset.ciEdit));
+  $("ciHead").scrollIntoView({ behavior: calm.matches ? "auto" : "smooth", block: "start" });
+  $("ciName").focus({ preventScroll: true });
+});
+$("checkins").addEventListener("change", async e => {
+  const b = e.target.closest("[data-ci-on]"); if (!b || !S.ci) return;
+  const name = b.dataset.ciOn;
+  b.disabled = true;
+  try {
+    const r = await ciSend(S.ci.checkins.map(c => c.name === name ? { ...c, on: b.checked } : c));
+    toast(`${name} ${b.checked ? "on" : "off"}${r.taken_off ? "; the one waiting came off the clocks" : ""}`);
+  } catch (err) { toast("Not changed: " + err.message, true); loadCheckins(); }
+});
+$("ciSave").onclick = async () => {
+  if (!S.ci) return toast("The bridge isn't answering", true);
+  const was = S.ci.checkins.find(c => c.name === ciEditing);
+  const entry = { name: $("ciName").value.trim(), text: $("ciText").value.trim(),
+    times: [...new Set([...$("ciTimes").querySelectorAll("input")].map(i => i.value).filter(Boolean))].sort(),
+    words: $("ciWords").value.split(",").map(w => w.trim()).filter(Boolean),
+    clocks: [...$("ciClocks").querySelectorAll("input:checked")].map(b => b.value), sound: $("ciSound").value, on: was ? was.on : true };
+  if (!entry.name) { toast("Give the reminder a name", true); $("ciName").focus(); return; }
+  if (!entry.times.length) return toast("Give it at least one time", true);
+  if (!entry.clocks.length) return toast("Pick at least one clock", true);
+  const list = S.ci.checkins.filter(c => c !== was), at = S.ci.checkins.indexOf(was);
+  list.splice(at < 0 ? list.length : at, 0, entry);
+  const b = $("ciSave"); b.disabled = true;
+  try {
+    const r = await ciSend(list);
+    const saved = r.checkins.find(c => c.name === entry.name.toUpperCase().split(/\s+/).join(" "));
+    toast(`${saved ? saved.name : entry.name} ${was ? "saved" : "added"}: ${(saved || entry).times.map(hmTime).join(" and ")}${r.taken_off ? "; the one waiting came off the clocks" : ""}`);
+    ciForm(null);
+  } catch (err) { toast("Not saved: " + err.message, true); }
+  finally { b.disabled = false; }
+};
+$("ciCancel").onclick = () => ciForm(null);
+$("ciDelete").onclick = async () => {
+  const name = ciEditing; if (!name || !S.ci) return;
+  if (!confirm(`Delete the ${name} reminder? What's been logged stays in checkins.json.`)) return;
+  try {
+    const r = await ciSend(S.ci.checkins.filter(c => c.name !== name));
+    toast(`${name} deleted${r.taken_off ? "; the one waiting came off the clocks" : ""}`); ciForm(null);
+  } catch (err) { toast("Not deleted: " + err.message, true); }
+};
+ciForm(null);
+
 // ---- start ----
 function dmHeading(h, dm, label) { h.dataset.dm = dm; h.innerHTML = dmSVG(dm) + `<span class="sr">${esc(label)}</span>`; }
 document.querySelectorAll("[data-dm]").forEach(h => dmHeading(h, h.dataset.dm, h.textContent));
 showBrightness(); drawQuiet(); preview(); showKind(); rwPreview(); drawFace();
 renderScreens(null);
-loadOptions(); loadNotes(); loadStatus().then(() => { loadUnread(); loadSettings(); loadNudges(); loadScreens(); loadCalendars(); loadMessage(); });
-setInterval(() => { loadStatus(); loadUnread(); loadNotes(); loadScreens(); loadCalendars(); loadMessage(); api("/nudges").then(showSnooze).catch(() => {}); }, 10000);
+loadOptions(); loadNotes(); loadCheckins(); loadStatus().then(() => { loadUnread(); loadSettings(); loadNudges(); loadScreens(); loadCalendars(); loadMessage(); });
+setInterval(() => { loadStatus(); loadUnread(); loadNotes(); loadScreens(); loadCalendars(); loadMessage(); loadCheckins(); api("/nudges").then(showSnooze).catch(() => {}); }, 10000);
 let shownHour = new Date().getHours();
 setInterval(() => {
   drawFace(); renderFacts(); updateDues();

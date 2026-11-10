@@ -756,6 +756,28 @@ def make_app(clocks, shop_url=None, checks=None):
         log.info("%s: nudges: %s", clock.name, changes)
         return web.json_response(values)
 
+    async def get_checkins(request):
+        return web.json_response(checks.json() if checks else {"checkins": [], "from": "config", "clocks": list(clocks)})
+
+    async def set_checkins(request):
+        """{"checkins": [{name, text, times ["HH:MM"], words, clocks, sound, on}], "rev"}: replaces them all, kept in
+        checkins.json from then on (config.toml's [[checkins]] no longer count). Takes effect at once. rev, from
+        GET /checkins, is optional: if another panel saved since, nothing changes and the answer is 409."""
+        body = await read_body(request)
+        if checks is None:
+            return web.json_response({"error": "check-ins aren't running"}, status=503)
+        try:
+            gone = await checks.update(body.get("checkins"), body.get("rev"))
+        except checkins.Stale as e:
+            return web.json_response({"error": str(e)}, status=409)
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        except (TypeError, AttributeError):
+            return web.json_response({"error": "the reminders aren't in the right shape"}, status=400)
+        except OSError as e:
+            return web.json_response({"error": f"couldn't save: {e.strerror or type(e).__name__}"}, status=500)
+        return web.json_response({**checks.json(), "taken_off": gone})
+
     async def get_screens(request):
         return web.json_response(pick(request).screens.json())
 
@@ -838,7 +860,7 @@ def make_app(clocks, shop_url=None, checks=None):
     app.add_routes([web.post("/notify", notify), web.post("/sound", play_sound), web.get("/status", status),
                     web.get("/unread", list_unread), web.post("/unread/clear", clear_unread),
                     web.get("/settings", get_settings), web.post("/settings", set_settings),
-                    web.get("/options", options), web.post("/pickup", add_pickup), web.post("/stages", add_stages), web.post("/voice", voice), web.get("/nudges", get_nudges), web.get("/notes", list_notes), web.post("/notes", change_note), web.post("/nudges", set_nudges), web.get("/screens", get_screens), web.post("/screens", set_screens), web.get("/calendars", get_calendars), web.post("/calendars", set_calendars), web.get("/message", get_message), web.post("/message", set_message), web.get("/", panel)])
+                    web.get("/options", options), web.post("/pickup", add_pickup), web.post("/stages", add_stages), web.post("/voice", voice), web.get("/nudges", get_nudges), web.get("/notes", list_notes), web.post("/notes", change_note), web.post("/nudges", set_nudges), web.get("/checkins", get_checkins), web.post("/checkins", set_checkins), web.get("/screens", get_screens), web.post("/screens", set_screens), web.get("/calendars", get_calendars), web.post("/calendars", set_calendars), web.get("/message", get_message), web.post("/message", set_message), web.get("/", panel)])
     return app
 
 
@@ -883,9 +905,8 @@ async def main():
         if not tasks and cfg.get("shop_app", {}).get("url"):  # follow-up nags go to the first clock
             watchers["followups"] = lambda clock=clock: shopapp.watch_followups(clock, cfg["shop_app"])
         tasks += [asyncio.create_task(supervised(f"{name} {label}", start)) for label, start in watchers.items()]
-    checks = checkins.Checkins(cfg.get("checkins", []), clocks)  # daily check-ins, across all clocks
-    if checks.entries:
-        tasks.append(asyncio.create_task(supervised("check-ins", lambda: checkins.watch(checks))))
+    checks = checkins.Checkins(cfg.get("checkins", []), clocks)  # daily check-ins, across all clocks; set on the panel too
+    tasks.append(asyncio.create_task(supervised("check-ins", lambda: checkins.watch(checks))))
     if cfg.get("shop_app", {}).get("url"):  # pickups both ways with the shop app, across all clocks
         tasks.append(asyncio.create_task(supervised("pickup sync", lambda: pickupsync.watch(clocks, cfg["shop_app"]["url"]))))
     runner = web.AppRunner(make_app(clocks, cfg.get("shop_app", {}).get("url"), checks))

@@ -68,8 +68,8 @@ def clock_time(epoch):
     return datetime.datetime.fromtimestamp(epoch).strftime("%I:%M").lstrip("0")
 
 
-def text_of(item):
-    return " ".join(filter(None, (KINDS[item["kind"]]["label"], item.get("name"), clock_time(item["due"]))))[:120]
+def text_of(item):  # a check-in may say something other than its name ("say")
+    return " ".join(filter(None, (KINDS[item["kind"]]["label"], item.get("say") or item.get("name"), clock_time(item["due"]))))[:120]
 
 
 def schedule(item, due):
@@ -106,8 +106,8 @@ def matches(clock, what=""):
     """(clock, item) for each timer, pickup, stop or staged timer on this clock whose text has all the
     words ("timer" also matches a staged timer: "the caps timer")."""
     words = [w for w in re.findall(r"[a-z0-9]+", what.lower()) if w not in STOPWORDS]
-    return [(clock, i) for i in clock.unread.items if i.get("due") and i.get("kind") in KINDS
-            and all(w in i["text"].lower() or (w == "timer" and i.get("stages")) for w in words)]
+    return [(clock, i) for i in clock.unread.items if i.get("due") and i.get("kind") in KINDS  # a check-in's name may not be in its text
+            and all(w in f"{i['text']} {i.get('name', '')}".lower() or (w == "timer" and i.get("stages")) for w in words)]
 
 
 def best(candidates):
@@ -279,7 +279,7 @@ async def watch(clock):
                 continue
             stage, sound = owed
             name = item.get("name", "")
-            words = (spec["label"], stage, name) if spec["label"] else (name, stage)  # "MEDS NOW"
+            words = (spec["label"], stage, name) if spec["label"] else (item.get("say") or name, stage)  # "MEDS NOW"
             try:
                 await clock.notify(text=" ".join(filter(None, words))[:120],
                                    **spec["look"], sound=sound, priority=ALERT["priority"], flash=stage == "NOW")

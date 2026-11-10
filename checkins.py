@@ -4,17 +4,21 @@ its sound and the light flash, every few minutes until it's confirmed: by voice,
 the panel. Clearing everything leaves check-ins alone. Confirming on one clock clears it on all of
 them. Confirmations are logged in checkins.json, so "did I take my meds?" has an answer.
 
-In config.toml, one table per check-in (24-hour local times):
+Set on the panel's Daily reminders card (kept in checkins.json, which then wins over the config),
+or in config.toml, one table per check-in (24-hour local times):
 
     [[checkins]]
-    name = "MEDS"                     # what the clock shows
+    name = "MEDS"                     # its name: what the log and the replies call it
+    text = "TAKE YOUR MEDS"           # what the clock shows when it asks (default: the name)
     times = ["06:00", "12:00"]
     words = ["meds", "pills"]         # what you call it out loud (the name always counts)
     clocks = ["office"]               # the clocks that ask (default: all)
     sound = "Shine"                   # the nag's sound (default: pickups.KINDS["checkin"])
+    on = true                         # false: kept, but doesn't ask
 """
 import asyncio
 import datetime
+import hashlib
 import json
 import logging
 import re
@@ -28,9 +32,14 @@ PATH = Path(__file__).parent / "checkins.json"
 LATE_HOURS = 6  # a time missed while the bridge was down still comes up this long after
 EARLY_MINUTES = 60  # done this long before a time counts for that time, which then doesn't ask
 AGAIN_MINUTES = 90  # done again this soon after the last with nothing waiting: not logged twice
-KEEP_ASKED, KEEP_LOG = 200, 1000
+KEEP_ASKED, KEEP_LOG = 2000, 1000  # asked: two days of every time of every check-in, at the most there can be
+MAX_CHECKINS, MAX_TIMES = 20, 24
 
 log = logging.getLogger("glanced.checkins")
+
+
+class Stale(Exception):
+    """The panel's list was out of date: another panel changed the check-ins since it read them."""
 
 QUESTION = re.compile(r"\b(?:did i|have i|had i|when did i|when was|was it)\b")
 NOT = re.compile(r"\b(?:not|haven'?t|hadn'?t|didn'?t|never|forgot|forget|yet to|need to|have to|had to|had better|"
@@ -41,42 +50,65 @@ PRONOUN_ONLY = re.compile(rf"(?:i\s+)?(?:just\s+)?(?:i'?ve\s+)?{VERB}\s+(?:them|
 LEAD = re.compile(r"^(?:hey\s+)?(?:clock|glance)\b[\s,.:;!-]*")
 
 
-def clean(entry, clock_names):
-    """A [[checkins]] table -> {name, times [(h, m)], words, clocks, sound}, or None if it can't ask.
-    Anything wrong is logged and left out, never raised: a typo mustn't stop the bridge."""
+def clean(entry, clock_names, strict=False):
+    """A check-in as written -> {name, text, times [(h, m)], words, clocks, sound, on}, or None if it
+    can't ask. From config.toml anything wrong is logged and left out, never raised: a typo mustn't stop
+    the bridge. strict (from the panel): a ValueError says what's wrong instead."""
+    name = "CHECK-IN"
+
+    def problem(message, then):  # then: what's done about it when it's from config.toml
+        if strict:
+            raise ValueError(f"{name}: {message}" if name != "CHECK-IN" else message)
+        log.warning("check-in %s: %s; %s", name, message, then)
+
     if not isinstance(entry, dict):
-        log.warning("a [[checkins]] entry isn't a table; left out")
+        problem("a check-in should be a table of settings", "left out")
         return None
-    name = str(entry.get("name", "")).upper().strip()[:24] or "CHECK-IN"
+    name = " ".join(str(entry.get("name") or "").upper().split())[:24]
+    if not name:
+        if strict:
+            raise ValueError("give the reminder a name")
+        name = "CHECK-IN"
 
     def listed(key, default):
         value = entry.get(key, default)
         if isinstance(value, str):
             return [value]
         if not isinstance(value, list):
-            log.warning("check-in %s: %s should be a list; left out", name, key)
+            problem(f"{key} should be a list", "left out")
             return []
         return value
 
-    times = []
+    times = set()
     for t in listed("times", []):
         m = re.fullmatch(r"(\d{1,2}):(\d{2})", str(t).strip())
         if m and int(m[1]) < 24 and int(m[2]) < 60:
-            times.append((int(m[1]), int(m[2])))
+            times.add((int(m[1]), int(m[2])))
         else:
-            log.warning("check-in %s: %r isn't a 24-hour HH:MM time; left out", name, t)
-    clocks = [c for c in listed("clocks", clock_names) if c in clock_names]
+            problem(f"{t!r} isn't a 24-hour HH:MM time", "left out")
+    if len(times) > MAX_TIMES:
+        problem(f"{MAX_TIMES} times a day at most", "only the first kept")
+        times = set(sorted(times)[:MAX_TIMES])
+    clocks = [c for c in dict.fromkeys(map(str, listed("clocks", clock_names))) if c in clock_names]
     for c in {str(c) for c in listed("clocks", [])} - set(clocks):
-        log.warning("check-in %s: no clock named %r", name, c)
-    words = list(dict.fromkeys([name.lower()] + [str(w).lower().strip() for w in listed("words", []) if str(w).strip()]))
-    sound = str(entry.get("sound", ""))
+        problem(f"there's no clock named {c!r}", "left out")
+    words = list(dict.fromkeys([name.lower()] + [" ".join(str(w).lower().split())[:40] for w in listed("words", []) if str(w).strip()]))
+    text = " ".join(str(entry.get("text") or "").upper().split())[:40]  # the clock reads best in capitals
+    sound = str(entry.get("sound") or "")
     proper = next((s for s in pb.Sound.keys() if s.lower() == sound.lower()), "")
     if sound and not proper:
-        log.warning("check-in %s: no sound named %r; using the default", name, sound)
+        problem(f"there's no sound named {sound!r}", "using the default")
     if not times or not clocks:
-        log.warning("check-in %s: no times or no clocks; it won't ask", name)
+        problem("it needs at least one time and one clock", "it won't ask")
         return None
-    return {"name": name, "times": sorted(times), "words": words, "clocks": clocks, "sound": proper}
+    return {"name": name, "text": "" if text == name else text, "times": sorted(times), "words": words,
+            "clocks": clocks, "sound": proper, "on": bool(entry.get("on", True))}
+
+
+def plain(entry):
+    """A cleaned check-in as it's saved and shown on the panel: times as HH:MM, words without the name."""
+    return {**entry, "times": [f"{h:02d}:{m:02d}" for h, m in entry["times"]],
+            "words": [w for w in entry["words"] if w != entry["name"].lower()]}
 
 
 def slot_key(entry, at):
@@ -85,11 +117,8 @@ def slot_key(entry, at):
 
 class Checkins:
     def __init__(self, entries, clocks, path=PATH):
+        """entries: config.toml's [[checkins]]; once the panel has set them, checkins.json's win."""
         self.clocks = clocks
-        if not isinstance(entries, list):
-            log.warning("checkins should be [[checkins]] tables; none set up")
-            entries = []
-        self.entries = [e for e in (clean(e, list(clocks)) for e in entries) if e]
         self.path = path
         try:
             state = json.loads(path.read_text())
@@ -97,13 +126,114 @@ class Checkins:
             state = None
         self.fresh = state is None  # first run: times already past don't ask
         self.asked = (state or {}).get("asked", [])  # slot keys put on the clocks, or done early
-        self.log = (state or {}).get("log", [])  # {"name", "slot", "time", "taken"}
+        self.log = (state or {}).get("log", [])  # {"name", "slot", "time", "taken"[, "missed"]}
+        self.from_panel = "entries" in (state or {})
+        if self.from_panel:
+            entries = state["entries"]
+            log.info("check-ins as set on the panel (%s); [[checkins]] in config.toml no longer counts", path.name)
+        if not isinstance(entries, list):
+            log.warning("checkins should be [[checkins]] tables; none set up")
+            entries = []
+        self.all = []  # every check-in, on or off
+        for entry in filter(None, (clean(e, list(clocks)) for e in entries)):
+            if any(e["name"] == entry["name"] for e in self.all):
+                log.warning("check-in %s: there's already one by that name; left out", entry["name"])
+            else:
+                self.all.append(entry)
+        self.entries = [e for e in self.all if e["on"]]  # the ones that ask
 
     def _save(self):
         self.asked, self.log = self.asked[-KEEP_ASKED:], self.log[-KEEP_LOG:]
+        state = {"asked": self.asked, "log": self.log}
+        if self.from_panel:
+            state["entries"] = [plain(e) for e in self.all]
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"asked": self.asked, "log": self.log}, indent=1))
+        tmp.write_text(json.dumps(state, indent=1))
         tmp.replace(self.path)
+
+    def rev(self):
+        """A revision of the list, so a panel can't save over another panel's change it hasn't seen."""
+        return hashlib.sha1(json.dumps([plain(e) for e in self.all]).encode()).hexdigest()[:12]
+
+    async def update(self, entries, rev=None, now=None):
+        """Replace every check-in with the panel's list, all checked before anything changes (a
+        ValueError says what's wrong; Stale if rev isn't the current one). A new one, one switched back
+        on, or one with new times doesn't ask for its times already past. An open one follows the edit:
+        off the clocks (not logged) when it's deleted, switched off or no longer asks on that clock, else
+        it shows the new text and sound. Returns how many open ones came off."""
+        if rev is not None and rev != self.rev():
+            raise Stale("the reminders were changed on another panel since; showing them now")
+        if not isinstance(entries, list):
+            raise ValueError("send the reminders as a list")
+        if len(entries) > MAX_CHECKINS:
+            raise ValueError(f"{MAX_CHECKINS} reminders at most")
+        new = [clean(e, list(self.clocks), strict=True) for e in entries]
+        names = [e["name"] for e in new]
+        if twice := next((n for n in names if names.count(n) > 1), None):
+            raise ValueError(f"two reminders are called {twice}")
+        now = now or datetime.datetime.now()
+        await self.ask_due(now)  # anything just due under the old list goes up first, so an edit can't swallow it
+        before = {e["name"]: e["times"] for e in self.entries}
+        asking = [e for e in new if e["on"]]
+        was = self.all, self.entries, self.from_panel, list(self.asked)
+        for entry in asking:
+            if before.get(entry["name"]) == entry["times"]:
+                continue
+            for back in (1, 0):
+                for h, m in entry["times"]:
+                    at = (now - datetime.timedelta(days=back)).replace(hour=h, minute=m, second=0, microsecond=0)
+                    if at <= now and slot_key(entry, at) not in self.asked:
+                        self.asked.append(slot_key(entry, at))
+        self.all, self.entries, self.from_panel = new, asking, True
+        try:
+            self._save()
+        except OSError:
+            self.all, self.entries, self.from_panel, self.asked = was
+            raise
+        log.info("check-ins set on the panel: %s", ", ".join(f"{e['name']}{'' if e['on'] else ' (off)'}" for e in new) or "none")
+        by_name, gone = {e["name"]: e for e in asking}, []
+        for clock, item in self.open_items():
+            entry = by_name.get(item["name"])
+            if not entry or clock.name not in entry["clocks"]:
+                clock.unread.clear(item["id"])
+                gone.append(clock)
+                log.info("check-in taken off %s: %s", clock.name, item["checkin"])
+                continue
+            for key in ("say", "sound"):
+                item.pop(key, None)
+            item.update(**({"say": entry["text"]} if entry["text"] else {}), **({"sound": entry["sound"]} if entry["sound"] else {}))
+            item["text"] = pickups.text_of(item)
+            clock.unread._save()
+        for clock in set(gone):
+            try:
+                await clock.refresh_ring()
+            except Exception as e:
+                log.warning("ring refresh failed: %s", e)
+        return len(gone)
+
+    def json(self, now=None):
+        """For the panel: every check-in as set, with how each of today's times went (taken, skipped,
+        missed, open, later, or none: not asked), any still open from earlier ("day": "earlier", or one
+        whose time has since changed), and any logged outside a time."""
+        now = now or datetime.datetime.now()
+        out = []
+        for entry in self.all:
+            opened = {i["checkin"]: i["due"] for _, i in self.open_items([entry["name"]])}
+            keys = {slot_key(entry, now.replace(hour=h, minute=m, second=0, microsecond=0)) for h, m in entry["times"]}
+            slots = [{"time": f"{datetime.datetime.fromtimestamp(due):%H:%M}", "state": "open",
+                      **({"day": "earlier"} if datetime.date.fromtimestamp(due) < now.date() else {})}
+                     for key, due in sorted(opened.items(), key=lambda kd: kd[1]) if key not in keys and due <= now.timestamp()]
+            for h, m in entry["times"]:
+                at = now.replace(hour=h, minute=m, second=0, microsecond=0)
+                key = slot_key(entry, at)
+                done = next((l for l in reversed(self.log) if l["slot"] == key), None)
+                state = ("taken" if done.get("taken", True) else "missed" if done.get("missed") else "skipped") if done \
+                    else "open" if key in opened else "later" if at > now else "none"
+                slots.append({"time": f"{h:02d}:{m:02d}", "state": state, **({"at": done["time"]} if done else {})})
+            extra = [l["time"] for l in self.log if l["name"] == entry["name"] and l["slot"] is None
+                     and l.get("taken", True) and datetime.date.fromtimestamp(l["time"]) == now.date()]
+            out.append({**plain(entry), "today": slots, "extra": extra})
+        return {"checkins": out, "from": "panel" if self.from_panel else "config", "clocks": list(self.clocks), "rev": self.rev()}
 
     def said(self, text):
         """The entries whose spoken words (or name) are in the text."""
@@ -164,14 +294,15 @@ class Checkins:
             if datetime.date.fromtimestamp(item["due"]) < at.date():
                 clock.unread.clear(item["id"])
                 if not any(l["slot"] == item["checkin"] for l in self.log):
-                    self.log.append({"name": entry["name"], "slot": item["checkin"], "time": time.time(), "taken": False})
+                    self.log.append({"name": entry["name"], "slot": item["checkin"], "time": time.time(), "taken": False, "missed": True})
                 log.info("check-in missed: %s", item["checkin"])
         look = pickups.KINDS["checkin"]["look"]
         for name in entry["clocks"]:
             clock = self.clocks[name]
             try:
                 item = clock.unread.add({"text": "", **look}, "checkin")
-                item.update(kind="checkin", name=entry["name"], checkin=key, **({"sound": entry["sound"]} if entry["sound"] else {}))
+                item.update(kind="checkin", name=entry["name"], checkin=key, **({"say": entry["text"]} if entry["text"] else {}),
+                            **({"sound": entry["sound"]} if entry["sound"] else {}))
                 pickups.schedule(item, at.timestamp())
                 item["ringing"] = True  # due now: no countdown
                 clock.unread._save()
