@@ -1,0 +1,17 @@
+#!/bin/sh
+#Put a drop-off on the Glance Clock: dropoff "Sam - Rhodes" 40m [clock]   (or 1h30, 2:30pm, 14:30)
+#Confirm one has come in:           dropoff --in ["Sam"]   (words from its name; none: the only one, or the one due)
+#Without a clock name it goes to the first clock in config.toml.
+url="${GLANCE_URL:-http://127.0.0.1:8740}"
+if [ "${1:-}" = "--in" ]; then
+  what=$(printf '%s' "${2:-}" | sed 's/["\\]//g')
+  curl -s -XPOST "$url/dropoff/arrived" -d "{\"what\":\"$what\"}"
+  echo
+  exit 0
+fi
+[ $# -ge 2 ] || { echo 'usage: dropoff "name" 40m|1h30|2:30pm [clock]   or   dropoff --in ["name"]' >&2; exit 2; }
+name=$(printf '%s' "$1" | sed 's/["\\]//g')
+when=$(printf '%s' "$2" | sed 's/["\\]//g')
+clock=$(printf '%s' "${3:-}" | sed 's/["\\]//g')
+curl -s -XPOST "$url/pickup" -d "{\"kind\":\"dropoff\",\"name\":\"$name\",\"when\":\"$when\"${clock:+,\"clock\":\"$clock\"}}"
+echo

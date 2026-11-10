@@ -23,11 +23,14 @@ of his `Glance.proto`, fixed so `protoc` accepts it. Everything here builds on t
   from chosen people (e.g. texts via Google Messages for Web); Google Calendar events (15 min, 5 min, now)
   from any number of calendars, added and removed on the panel; anything that can `curl` (a Claude Code
   hook is in `contrib/`).
-- **Timers, pickups and hard stops**, with the clock's own **ring countdown**. A hard stop nags at 30, 15
-  and 5 minutes, then repeats "STOP NOW" every 5 minutes for half an hour unless cleared.
+- **Timers, pickups, drop-offs and hard stops**, with the clock's own **ring countdown**. A hard stop nags at
+  30, 15 and 5 minutes, then repeats "STOP NOW" every 5 minutes for half an hour unless cleared. A drop-off
+  (someone bringing an instrument in) is green with the Hello sound, and after its time asks again every
+  10 minutes for an hour until it's confirmed come in ("hey glance, Sam dropped off the Rhodes", or Arrived
+  on the panel).
 - **Light flash** for anything due now (a timer, pickup or stop going off, a calendar event starting): all
   four rings flash red and white for 3 seconds before the text. `/notify` takes `"flash": true` too.
-- **Schedule ring**: the next 11 hours of calendar events (aqua), pickups (gold) and hard stops (red) as
+- **Schedule ring**: the next 11 hours of calendar events (aqua), pickups (gold), drop-offs (green) and hard stops (red) as
   blocks around the dial at their times, drawn by the clock's own appointments display. It stops at
   midnight.
 - **Staged timers** on the clock's own multi-interval timer: each stage counts down on the ring with its
@@ -149,13 +152,15 @@ works (ours is a private Flask shop system), given these replies: `GET /api/cloc
 the toggle → `{"since", "to_assign"}`; other POSTs → an object whose `say` is spoken (or `"ok": false` on
 failure); `/api/followups/due` → `{"due": [...]}`.
 
-Pickups are shared with it too (`pickupsync.py`, every minute): one added or changed on a clock is sent
-(`POST /api/pickups {"name", "at", "source": "glance", "ref"}`, `"at"` ISO 8601 with offset, `"ref"` the clock
-item's id so a resend updates the same one, plus `"id"` once known; the reply's `pickup.id` is kept), one
-cleared before its time is cancelled (`POST /api/pickups/cancel {"id"}`), and `GET /api/pickups`
-(`{"pickups": [{"id", "name", "at", "source"}], "cancelled": [ids]}`) brings the shop app's own ones onto the
-first clock and takes the cancelled ones off; one it doesn't list at all is sent again. A shop app without
-these endpoints (404) is left alone.
+Pickups and drop-offs are shared with it too (`pickupsync.py`, every minute): one added or changed on a clock
+is sent (`POST /api/pickups {"name", "at", "kind", "source": "glance", "ref"}`, `"at"` ISO 8601 with offset,
+`"kind"` `pickup` or `dropoff`, `"ref"` the clock item's id so a resend updates the same one, plus `"id"` once
+known; the reply's `pickup.id` is kept), one cleared before its time is cancelled (`POST /api/pickups/cancel
+{"id"}`), a drop-off confirmed on a clock is confirmed there (`POST /api/pickups/arrived {"id"}`), and
+`GET /api/pickups` (`{"pickups": [{"id", "name", "at", "kind", "source", "arrived_at"}], "cancelled": [ids]}`)
+brings the shop app's own ones onto the first clock and takes the cancelled ones, and drop-offs with an
+`arrived_at`, off; one it doesn't list at all is sent again. A shop app without these endpoints (404) is
+left alone.
 Calendar events with a UID like `pickup-12@keyandcable-shop` (our shop app's calendar feed) are skipped by the
 calendar watcher, since those pickups are already on the clock.
 
@@ -173,7 +178,8 @@ All on `http://127.0.0.1:8740`; every call takes an optional `clock` (name), def
 | Call | Body / query | |
 |---|---|---|
 | `POST /notify` | `text, color, anim, sound, mode, priority, keep, flash` | Show an alert; `keep` adds it to unread, `flash` opens with the light flash |
-| `POST /pickup` | `kind` (`pickup`, `timer` or `stop`), `name`, `when` (`40m`, `30s`, `1h30`, `2:30pm`, `14:30`) | |
+| `POST /pickup` | `kind` (`pickup`, `dropoff`, `timer` or `stop`), `name`, `when` (`40m`, `30s`, `1h30`, `2:30pm`, `14:30`) | |
+| `POST /dropoff/arrived` | `id` (an unread item's) or `what` (words from its text) | A drop-off has come in: off the clock, confirmed in the shop app; returns `say` |
 | `POST /stages` | `name`, `stages` (`[["50V", 15], …]` or `[{"label", "minutes"}]`), `repeat` | Up to 20 stages |
 | `POST /voice` | `text` | A spoken sentence; returns `reply` to say back |
 | `GET /unread`, `POST /unread/clear` | `id` (none: all) | |
@@ -227,7 +233,7 @@ The full reference, with every command, error code and setting found so far, is 
 
 `glanced.py` the bridge · `glance.py` protocol helpers + one-shot CLI · `config.py` · `mailwatch.py`,
 `textwatch.py`, `calwatch.py` sources · `pickups.py` timers/pickups/stops · `unread.py` · `nudges.py` ·
-`notes.py` · `statusring.py` (and the light flash) · `schedulering.py` · `forecast.py` · `animscreen.py` · `screensaver.py` · `claudeface.py` Claude's face · `screens.py` · `calendars.py` · `ringwords.py` words on the rings · `shopapp.py` optional shop app · `brain.py` Haiku · `clockvoice.py` voice front end · `panel.html` · `pickup` CLI ·
+`notes.py` · `statusring.py` (and the light flash) · `schedulering.py` · `forecast.py` · `animscreen.py` · `screensaver.py` · `claudeface.py` Claude's face · `screens.py` · `calendars.py` · `ringwords.py` words on the rings · `shopapp.py` optional shop app · `brain.py` Haiku · `clockvoice.py` voice front end · `panel.html` · `pickup` and `dropoff` CLIs ·
 `set_setting.py` · `contrib/` · `PROTOCOL.md` the protocol reference
 
 ## License

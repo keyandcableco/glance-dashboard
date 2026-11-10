@@ -387,6 +387,7 @@
         <div class="sh"><h2 class="dm" id="hPickup" data-dm="PICKUP">Pickup</h2></div>
         <div class="opts" id="pKind" role="radiogroup" aria-label="Kind" style="margin:0 0 14px">
           <label class="opt"><input type="radio" name="pKind" value="pickup" autocomplete="off" checked><span>Pickup</span></label>
+          <label class="opt"><input type="radio" name="pKind" value="dropoff" autocomplete="off"><span>Drop-off</span></label>
           <label class="opt"><input type="radio" name="pKind" value="timer" autocomplete="off"><span>Timer</span></label>
           <label class="opt"><input type="radio" name="pKind" value="stop" autocomplete="off"><span>Hard stop</span></label>
         </div>
@@ -772,8 +773,8 @@ const S = { bridge: null, status: null, unread: [], settings: null, nudges: null
 // the 32x8 display (43% of the diameter wide) just below the centre pin; real hands on top ----
 const RING_OUT = 170, RING_DEPTH = 18.1, RINGS = [0, 1, 2, 3];
 const DAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const KIND = { pickup: "Pickup", timer: "Timer", stop: "Hard stop", stages: "Staged timer" };
-const RING_FROM = { pickup: 10, timer: null, stop: 30, stages: null };  // minutes before due the ring starts, as in pickups.py
+const KIND = { pickup: "Pickup", dropoff: "Drop-off", timer: "Timer", stop: "Hard stop", stages: "Staged timer" };
+const RING_FROM = { pickup: 10, dropoff: 10, timer: null, stop: 30, stages: null };  // minutes before due the ring starts, as in pickups.py
 const TIMER_COLOR = "#3ccf4e", TIMER_MIN_COLOR = "#ffc23d";  // the Timer has no colour field: the clock draws seconds green, minutes yellow
 const ITEM_PX = 3, ITEM_GAP = 1, ITEM_MAX = 12;  // statusring.py: one 3-LED segment per unread item from 12 o'clock, the oldest 12
 const ARC_STEPS = 12, FOCUS_WARN = 0.8;  // statusring.py: the active stretch on the inner ring, green then orange
@@ -987,6 +988,7 @@ async function loadUnread() {
       <span class="chipled">${ledChip(i.color)}</span>
       <div class="itext"><div class="t">${richText(i.text)}${i.count > 1 ? " ×" + (+i.count) : ""}</div>
         <div class="meta"><span class="src">${esc(i.source)}</span> · ${ago(i.time)}${i.due ? ` · <span data-due="${+i.due}"></span>` : ""}</div></div>
+      ${i.kind === "dropoff" ? `<button class="btn sm primary" data-arrive="${esc(i.id)}" aria-label="Arrived: ${esc(i.text)}">Arrived</button>` : ""}
       <button class="btn sm" data-id="${esc(i.id)}" aria-label="Clear: ${esc(i.text)}">Clear</button>
     </li>`).join("") : `<li class="empty">Nothing unread.</li>`;
   updateDues(); renderFacts(); drawFace();
@@ -1016,6 +1018,12 @@ async function loadOptions() {
 }
 
 $("unread").addEventListener("click", async e => {
+  const a = e.target.closest("[data-arrive]");
+  if (a) {  // a drop-off has come in: off the clock, confirmed in the shop app
+    a.disabled = true;
+    try { toast((await api("/dropoff/arrived", { id: a.dataset.arrive })).say); } catch (err) { toast("Not confirmed: " + err.message, true); }
+    return loadUnread();
+  }
   const b = e.target.closest("[data-id]"); if (!b) return;
   try { await api("/unread/clear", { id: b.dataset.id }); } catch (err) { toast("Not cleared: " + err.message, true); }
   loadUnread(); loadCheckins();  // clearing a daily reminder logs it done
@@ -1148,6 +1156,8 @@ $("sayForm").addEventListener("submit", async e => {
 const PICK = {
   pickup: { head: "PICKUP", name: "Who / what", ph: "Sam - Juno", btn: "Add pickup",
             hint: "Alerts now, 10 minutes before, and when due. Clear it from Unread when they've been." },
+  dropoff: { head: "DROP-OFF", name: "Who / what", ph: "Sam - Rhodes", btn: "Add drop-off",
+             hint: "Green, with the Hello sound: alerts now, 10 minutes before and when due, then every 10 minutes for an hour until you tap Arrived in Unread (or say \u201chey glance, Sam dropped off the Rhodes\u201d). The shop app\u2019s Today page then offers its intake." },
   timer: { head: "TIMER", name: "Label (optional)", ph: "Bake", btn: "Start timer",
            hint: "Counts down on the ring from now. Alerts now, at 10 minutes left, and when it's up." },
   stop: { head: "HARD STOP", name: "What for (optional)", ph: "Close up", btn: "Set hard stop",
@@ -1166,12 +1176,12 @@ document.querySelectorAll("[data-when]").forEach(b => b.onclick = () => { $("pWh
 $("pWhen").addEventListener("input", markWhen);
 $("addPickup").onclick = async () => {
   const kind = pickKind(), name = $("pName").value.trim(), when = $("pWhen").value.trim();
-  if (kind === "pickup" && !name) return toast("Fill in who and when", true);
+  if ((kind === "pickup" || kind === "dropoff") && !name) return toast("Fill in who and when", true);
   if (!when) return toast("Fill in when", true);
   $("addPickup").disabled = true;  // one tap, one pickup
   try {
     const item = await api("/pickup", { kind, name, when });
-    toast(item.text.replace(/^(PICKUP|TIMER|STOP) /, KIND[kind] + ": ")); $("pName").value = ""; $("pWhen").value = ""; markWhen(); loadUnread();
+    toast(item.text.replace(/^(PICKUP|DROP-OFF|TIMER|STOP) /, KIND[kind] + ": ")); $("pName").value = ""; $("pWhen").value = ""; markWhen(); loadUnread();
   } catch (e) { toast("Not added: " + e.message, true); }
   finally { $("addPickup").disabled = false; }
 };

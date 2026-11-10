@@ -1,5 +1,5 @@
 """Words on the rings: two lines drawn in letters round the clock's four rings, one more screen in the
-turn. They say what was typed on the panel while it lasts, else the next pickup or hard stop due within
+turn. They say what was typed on the panel while it lasts, else the next pickup, drop-off or hard stop due within
 the hour, else what the clock's words source says.
 
 The 4 rings of 48 LEDs make a display 4 lights tall and 48 wide that wraps round the dial. The font is
@@ -54,7 +54,7 @@ EVERY_MINUTES = 5
 RUN_S = 30  # a words command that takes longer is stopped
 STALE_S = 60 * 60
 RETRY_S = 60  # after a failed run, say before the network is up
-SOON_KINDS = ("pickup", "stop")
+SOON_KINDS = ("pickup", "dropoff", "stop")
 SOON_S, LATE_S = 60 * 60, 15 * 60  # these take the words from an hour before they're due to 15 minutes after
 
 FONT = {

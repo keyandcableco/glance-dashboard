@@ -18,7 +18,7 @@ SYSTEM = """You turn a short spoken command into exactly one call to one of your
 transcribed from speech across a workshop, so expect missing punctuation and misheard words; go by \
 the likely meaning. Times: give `minutes` for a duration from now ("in half an hour" = 30, "45 seconds" = 0.75) or `at` \
 as 24-hour HH:MM for a clock time ("after lunch" = 13:00, "end of day" = 17:00); set the other to 0 or \
-empty. Timer, pickup and stop labels are short (a few words) and in capitals; text for the shop app \
+empty. Timer, pickup, drop-off and stop labels are short (a few words) and in capitals; text for the shop app \
 (switch_job, wait_on_customer, customer_replied) stays as said, so names still match, and clock_out's \
 `done` is what the speaker says they did, in their own words. `clock` is empty unless the speaker \
 names one of the clocks (for change and cancel: the clock the item is on; move_to is where it goes). \
@@ -48,6 +48,11 @@ def tools(clock_names, checkin_names=()):
              {**WHEN, "label": {"type": "string", "description": "What it's for, or empty"}}),
         tool("add_pickup", "Someone is coming to pick something up (or drop by) at a time.",
              {**WHEN, "name": {"type": "string", "description": "Who, and what if said"}}),
+        tool("add_dropoff", "Someone is coming to drop an instrument off (bring it in for repair) at a time.",
+             {**WHEN, "name": {"type": "string", "description": "Who, and the instrument if said, e.g. SAM - RHODES"}}),
+        tool("confirm_dropoff", "A drop-off that was expected has come in: 'Sam dropped off the Rhodes', "
+             "'the drop-off is here', 'Sam's here with the Juno'. Not for a new drop-off with a time.",
+             {"what": {"type": "string", "description": "Words from its text as listed under Set now (e.g. the name); empty if not said"}}),
         tool("show_message", "Put a short message up on the clock.",
              {"text": {"type": "string"}}),
         tool("set_hard_stop", "The speaker must stop working at a time (leave, close up, quit for the "
@@ -63,7 +68,7 @@ def tools(clock_names, checkin_names=()):
                          "items": {"type": "object", "additionalProperties": False, "required": ["label", "minutes"],
                                    "properties": {"label": {"type": "string"}, "minutes": {"type": "integer"}}}},
               "repeat": {"type": "integer", "description": "How many times to run the list; 1 for once"}}),
-        tool("change", "Change a timer, reminder, pickup or hard stop that's already set or going off: rename it, "
+        tool("change", "Change a timer, reminder, pickup, drop-off or hard stop that's already set or going off: rename it, "
              "move it to a new time, give it more time ('five more minutes', 'snooze it 10'), or move it "
              "to another clock. Never use set_timer to change an existing one.",
              {"what": {"type": "string", "description": "Words from its text as listed under Set now (e.g. '8:53' or 'GLUE'); empty for the one going off or the newest"},
@@ -72,7 +77,8 @@ def tools(clock_names, checkin_names=()):
               "at": {"type": "string", "description": "New time as 24-hour HH:MM, or empty"},
               "add_minutes": {"type": "integer", "description": "Minutes to add (snooze/extend), or 0"},
               "move_to": {"type": "string", "enum": [*clock_names, ""], "description": "Clock to move it to, or empty"}}),
-        tool("cancel", "Cancel or stop a timer, reminder, pickup or hard stop that's set or going off.",
+        tool("cancel", "Cancel or stop a timer, reminder, pickup, drop-off or hard stop that's set or going off "
+             "(a drop-off that's come in is confirm_dropoff, not cancel).",
              {"what": {"type": "string", "description": "Words from its text as listed under Set now; empty for the one going off or the newest"}}),
         tool("add_note", "Save a note to self for later, with no time attached (an idea, something to order, "
              "something to remember). Use set_timer instead when a time is given.",

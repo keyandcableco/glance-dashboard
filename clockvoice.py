@@ -4,6 +4,7 @@
     clock, timer 30 minutes                      clock, remind me in 20 minutes to call Sam
     clock, timer an hour and a half for lunch    clock, Sam is picking up the Juno at 2:30
     clock, pickup Sam in 40 minutes              clock, show back in 5
+    clock, Sam's dropping off a Rhodes at 3      clock, Sam dropped off the Rhodes   (confirms it)
     clock, clear                                 clockvoice.py --dry-run "clock, timer 30 minutes"
     clock, family, timer 10 minutes              (a clock's name first sends it to that clock)
     clock, focus 50                              (staged: WORK 50 / BREAK 10, three rounds, ending on WORK)
@@ -124,6 +125,22 @@ def parse_command(t):
     if m := re.match(r"(?:show|say|display|put up)\s+(.+)", t):
         return "/notify", {"text": m[1].upper()[:120], "color": "White", "sound": "NoneSound",
                            "priority": "critical"}, "On the clock."
+    # a drop-off: with a time it's a new one; without, "Sam dropped off the Rhodes" / "the drop-off's here"
+    # confirms one. Never inside a timer or reminder ("remind me in 20 minutes to drop off the invoice") or
+    # a pickup ("Bob's picking up what Sam dropped off at 5").
+    errand = re.search(r"\b(?:timer|remind|alarm|wake me|ping me|nudge me)\b|\bpick(?:ing)?\s*-?\s*up\b|\bpickup\b", t)
+    when = duration(t) or clock_time(t)
+    if not errand and not when and re.search(
+            r"\bdropped\b(?:\s+\S+){0,4}?\s+off\b|\bdrop\s*-?\s*off(?: is|'s)? (?:here|in)\s*$", t):
+        what = re.sub(r"\b(?:dropped|drop\s*-?\s*off|off|is|'s|here|in|just|has|have|already)\b", " ", t)
+        return "/dropoff/arrived", {"what": " ".join(what.replace("'s", " ").split())}, None
+    if not errand and re.search(r"\bdrop(?:ping|s)?\s*-?\s*off\b", t):
+        if not when:
+            return None
+        rest = strip_time(t)
+        rest = re.sub(r"\b(?:is|are|will be|will|'s)?\s*(?:coming (?:in |by )?to )?drop(?:ping|s)?\s*-?\s*off\b", " ", rest)
+        rest = re.sub(r"^(?:a\s+)?(?:new\s+)?", "", " ".join(rest.split()))
+        return "/pickup", {"kind": "dropoff", "name": tidy(rest) or "someone", "when": when}, None
     if re.search(r"\bpick(?:ing)?\s*-?\s*up\b|\bpickup\b|\bcoming (?:in|by)\b", t):
         when = duration(t) or clock_time(t)
         if not when:
@@ -160,7 +177,7 @@ def spoken_due(item):
         count = len(item["stages"])
         return (f"{count} stage{'s' if count != 1 else ''} for {item.get('name') or 'you'}, {first} first, "
                 f"done at {item['text'].rsplit(' ', 1)[-1]}.")
-    label = {"pickup": "Pickup", "timer": "Timer", "stop": "Hard stop"}.get(item["kind"], "Set")
+    label = {"pickup": "Pickup", "dropoff": "Drop-off", "timer": "Timer", "stop": "Hard stop"}.get(item["kind"], "Set")
     name = f" for {item['name']}" if item.get("name") and item["kind"] == "timer" else (f", {item['name']}" if item.get("name") else "")
     hhmm = item["text"].rsplit(" ", 1)[-1]
     return f"{label}{name}, at {hhmm}."

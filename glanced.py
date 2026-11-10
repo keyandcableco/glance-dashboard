@@ -488,13 +488,65 @@ def make_app(clocks, shop_url=None, checks=None):
     async def add_pickup(request):
         body = await read_body(request)
         kind = body.get("kind", "pickup")
-        if not body.get("when") or kind not in ("pickup", "timer", "stop") or (kind == "pickup" and not body.get("name")):
-            return web.json_response({"error": "when (and a name for pickups) required"}, status=400)
+        if (not body.get("when") or kind not in ("pickup", "dropoff", "timer", "stop")
+                or (kind in ("pickup", "dropoff") and not str(body.get("name", "")).strip())):
+            return web.json_response({"error": "when (and a name for pickups and drop-offs) required"}, status=400)
         try:
             item = await pickups.add(pick(request, body), str(body.get("name", "")).strip(), body["when"], kind)
         except ValueError as e:
             return web.json_response({"error": str(e)}, status=400)
         return web.json_response(item)
+
+    def find_dropoff(what="", clock_name="", item_id=""):
+        """(clock, drop-off) meant: by its id on the named clock, else the one with the most of the
+        words in its text (the one going off, else the soonest due; the named clock first); with words
+        that match none, the only drop-off set. None if there's no telling."""
+        named = clocks.get(clock_name or "")
+        if item_id:
+            for c in ([named] if named else clocks.values()):
+                for i in c.unread.items:
+                    if i["id"] == item_id and i.get("kind") == "dropoff":
+                        return c, i
+            return None
+        now = time.time()
+        words = {w for w in re.findall(r"[a-z0-9]+", what.lower()) if len(w) > 2 and w not in pickups.STOPWORDS}
+
+        def mine(c):  # "Sam dropped off his Rhodes": the drop-offs with SAM and RHODES, else either
+            found = [(c, i) for i in c.unread.items if i.get("kind") == "dropoff" and i.get("due")]
+            score = {i["id"]: sum(w in f"{i['text']} {i.get('name', '')}".lower() for w in words) for _, i in found}
+            best = max(score.values(), default=0)
+            return [m for m in found if score[m[1]["id"]] == best] if best or not words else []
+
+        def pick_one(found):  # one going off or overdue (latest first), else the soonest ahead
+            due = [m for m in found if m[1]["due"] <= now + 15 * 60]
+            return max(due, key=lambda m: m[1]["due"]) if due else min(found, key=lambda m: m[1]["due"], default=None)
+        every = [m for c in clocks.values() for m in mine(c)]
+        if not every and words:  # no name heard that matches: the only drop-off set is the one meant
+            alone = [(c, i) for c in clocks.values() for i in c.unread.items if i.get("kind") == "dropoff" and i.get("due")]
+            every = alone if len(alone) == 1 else []
+        return (named and pick_one(mine(named))) or pick_one(every)
+
+    async def dropoff_in(what="", clock_name="", item_id=""):
+        """Confirm a drop-off has come in: off the clock, confirmed in the shop app. Returns the reply."""
+        found = find_dropoff(what, clock_name, item_id)
+        if not found:
+            return "There's no drop-off like that on the clock."
+        clock, item = found
+        await pickupsync.arrive(clock, item)
+        name = item.get("name") or "the drop-off"
+        try:
+            await clock.alert("voice", text=f"{{in}} IN: {name.upper()}"[:120], color=pickups.KINDS["dropoff"]["look"]["color"],
+                              sound="NoneSound", priority="critical")
+        except Exception as e:
+            log.warning("drop-off confirm alert failed: %s", e)
+        return f"Got it, {name.title()} is in." + (" Start the intake from the shop app's Today page." if shop_url else "")
+
+    async def dropoff_arrived(request):
+        """{"id"} (an unread item's) or {"what"} (words from its text): that drop-off has come in."""
+        body = await read_body(request)
+        say = await dropoff_in(str(body.get("what", "")), str(body.get("clock") or request.query.get("clock", "")),
+                               str(body.get("id", "")))
+        return web.json_response({"say": say}, status=200 if say.startswith("Got it") else 404)
 
     api = brain.client()
     notebook = notes.Notes()
@@ -504,9 +556,11 @@ def make_app(clocks, shop_url=None, checks=None):
         minutes = args.get("minutes")  # a fraction for a timer in seconds
         when = (f"{int(minutes)}m" if minutes == int(minutes) else f"{round(minutes * 60)}s") if minutes else args.get("at")
         target = {"clock": args["clock"]} if args.get("clock") else {}
-        if name in ("set_timer", "add_pickup") and when:
-            kind = "timer" if name == "set_timer" else "pickup"
+        if name in ("set_timer", "add_pickup", "add_dropoff") and when:
+            kind = {"set_timer": "timer", "add_pickup": "pickup", "add_dropoff": "dropoff"}[name]
             return "/pickup", {"kind": kind, "name": args.get("label") or args.get("name") or "", "when": when, **target}
+        if name == "confirm_dropoff":
+            return "/dropoff/arrived", {"what": args.get("what", ""), **target}
         if name == "show_message":
             return "/notify", {"text": args["text"].upper()[:120], "color": "White", "sound": "NoneSound",
                                "priority": "critical", **target}
@@ -690,6 +744,8 @@ def make_app(clocks, shop_url=None, checks=None):
                             shopapp.prune(default, due_now)
             elif path == "/checkin":
                 reply = await checks.done(args.get("what", "")) if checks else "There are no check-ins set up."
+            elif path == "/dropoff/arrived":
+                reply = await dropoff_in(args.get("what", ""), request_clock)
             elif path == "/checkin/ask":
                 reply = checks.status(args.get("what", "")) if checks else "There are no check-ins set up."
             elif path == "/note":
@@ -723,7 +779,7 @@ def make_app(clocks, shop_url=None, checks=None):
         except Exception:
             log.exception("voice command failed: %r", text)
             return web.json_response({"reply": "The clock isn't answering.", "via": via})
-        if clock is not default and path not in ("/change", "/cancel", "/checkin", "/checkin/ask"):  # those say where
+        if clock is not default and path not in ("/change", "/cancel", "/checkin", "/checkin/ask", "/dropoff/arrived"):  # those say where
             reply = f"{clock.name.capitalize()} clock: {reply}"
         log.info("voice (%s): %r -> %s", via, text, reply)
         return web.json_response({"reply": reply, "via": via})
@@ -860,7 +916,7 @@ def make_app(clocks, shop_url=None, checks=None):
     app.add_routes([web.post("/notify", notify), web.post("/sound", play_sound), web.get("/status", status),
                     web.get("/unread", list_unread), web.post("/unread/clear", clear_unread),
                     web.get("/settings", get_settings), web.post("/settings", set_settings),
-                    web.get("/options", options), web.post("/pickup", add_pickup), web.post("/stages", add_stages), web.post("/voice", voice), web.get("/nudges", get_nudges), web.get("/notes", list_notes), web.post("/notes", change_note), web.post("/nudges", set_nudges), web.get("/checkins", get_checkins), web.post("/checkins", set_checkins), web.get("/screens", get_screens), web.post("/screens", set_screens), web.get("/calendars", get_calendars), web.post("/calendars", set_calendars), web.get("/message", get_message), web.post("/message", set_message), web.get("/", panel)])
+                    web.get("/options", options), web.post("/pickup", add_pickup), web.post("/dropoff/arrived", dropoff_arrived), web.post("/stages", add_stages), web.post("/voice", voice), web.get("/nudges", get_nudges), web.get("/notes", list_notes), web.post("/notes", change_note), web.post("/nudges", set_nudges), web.get("/checkins", get_checkins), web.post("/checkins", set_checkins), web.get("/screens", get_screens), web.post("/screens", set_screens), web.get("/calendars", get_calendars), web.post("/calendars", set_calendars), web.get("/message", get_message), web.post("/message", set_message), web.get("/", panel)])
     return app
 
 

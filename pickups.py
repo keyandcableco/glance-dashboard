@@ -1,9 +1,11 @@
-"""Pickups, timers, hard stops and staged timers: "someone's coming in 40 minutes", "timer 30 minutes",
-"I need to stop at 6", "reform the caps: 50V 15, 75V 15...". Each is an unread item with a due time;
-clearing the item cancels it.
+"""Pickups, drop-offs, timers, hard stops and staged timers: "someone's coming in 40 minutes", "Sam's
+dropping off a Rhodes at 3", "timer 30 minutes", "I need to stop at 6", "reform the caps: 50V 15, 75V
+15...". Each is an unread item with a due time; clearing the item cancels it.
 
 Each kind alerts when added, at its warnings (minutes before; one already passed is skipped), and
-when due, with the light flash. A hard stop repeats after it's due, for half an hour unless cleared. The ring counts down
+when due, with the light flash. A hard stop repeats after it's due, for half an hour unless cleared; a
+drop-off, with its own look and sound, every 10 minutes for an hour until it's confirmed come in
+(pickupsync.arrive) or cleared. The ring counts down
 from ring_from minutes out (None: from the start). A staged timer runs its labelled stages back to
 back on the clock's own multi-interval timer, and only alerts at the end.
 """
@@ -18,6 +20,9 @@ from glance import clock_text, encode_text, pb
 
 KINDS = {
     "pickup": {"label": "PICKUP", "look": {"color": "DarkGoldenRod", "anim": "Wheel"}, "warn": (10,), "ring_from": 10},
+    # someone bringing an instrument in: green blooming Flower and the Hello sound (pickups are gold Wheel, Rise)
+    "dropoff": {"label": "DROP-OFF", "look": {"color": "LawnGreen", "anim": "Flower"}, "warn": (10,), "ring_from": 10,
+                "sound": "Hello", "repeat_minutes": 10, "repeats": 6, "due_sound": "Hello"},
     "timer": {"label": "TIMER", "look": {"color": "Turquoise", "anim": "Fan"}, "warn": (10,), "ring_from": None},
     "stop": {"label": "STOP", "look": {"color": "Red", "anim": "Pulse"}, "warn": (30, 15, 5), "ring_from": 30,
              "repeat_minutes": 5, "repeats": 6, "due_sound": "Waves"},
@@ -34,6 +39,11 @@ ALERT = {"sound": "Rise", "priority": "critical"}
 DAY_START, DAY_END = 7, 21  # a bare "2:30" means the next one in these hours (14:30), not 2:30 at night
 
 log = logging.getLogger("glanced.pickups")
+
+
+def alert_of(kind):
+    """The alert settings for this kind: its own sound when it has one (a drop-off), else ALERT's."""
+    return {**ALERT, "sound": KINDS[kind].get("sound", ALERT["sound"])}
 
 
 def parse_when(when, now=None):
@@ -93,7 +103,7 @@ async def add(clock, name, when, kind="pickup", due=None):
     log.info("%s added: %s", kind, item["text"])
     await start_ring(clock, item)
     try:
-        await clock.notify(text=item["text"], **spec["look"], **ALERT)
+        await clock.notify(text=item["text"], **spec["look"], **alert_of(kind))
     except Exception as e:
         log.warning("%s alert failed: %s", kind, e)
     return item
@@ -103,11 +113,12 @@ STOPWORDS = ("the", "a", "an", "my", "that", "it", "one", "reminder", "hard")
 
 
 def matches(clock, what=""):
-    """(clock, item) for each timer, pickup, stop or staged timer on this clock whose text has all the
-    words ("timer" also matches a staged timer: "the caps timer")."""
+    """(clock, item) for each timer, pickup, drop-off, stop or staged timer on this clock whose text has
+    all the words ("timer" also matches a staged timer: "the caps timer"; "dropoff" a drop-off)."""
     words = [w for w in re.findall(r"[a-z0-9]+", what.lower()) if w not in STOPWORDS]
     return [(clock, i) for i in clock.unread.items if i.get("due") and i.get("kind") in KINDS  # a check-in's name may not be in its text
-            and all(w in f"{i['text']} {i.get('name', '')}".lower() or (w == "timer" and i.get("stages")) for w in words)]
+            and all(w in f"{i['text']} {i.get('name', '')}".lower() or w == i["kind"] or (w == "timer" and i.get("stages"))
+                    for w in words)]
 
 
 def best(candidates):
@@ -209,7 +220,7 @@ async def change(clock, item, name=None, due=None):
     await clock.refresh_ring()
     await start_ring(clock, item)
     try:
-        await clock.notify(text=item["text"], **KINDS[item["kind"]]["look"], **ALERT)
+        await clock.notify(text=item["text"], **KINDS[item["kind"]]["look"], **alert_of(item["kind"]))
     except Exception as e:
         log.warning("%s alert failed: %s", item["kind"], e)
     return item
@@ -243,7 +254,7 @@ def next_stage(item, spec, now):
         if not reached:
             return None
         fired.extend(reached)  # several reached at once (a late start): say only the nearest
-        return f"{min(reached)} MIN", ALERT["sound"]
+        return f"{min(reached)} MIN", spec.get("sound", ALERT["sound"])
     if not item.get("done"):
         # come up late (the bridge was down): the repeats already missed are skipped, not fired in a burst
         every = spec.get("repeat_minutes")

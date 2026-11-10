@@ -1,4 +1,4 @@
-"""Schedule ring: the coming hours' calendar events, pickups and hard stops as colored blocks around
+"""Schedule ring: the coming hours' calendar events, pickups, drop-offs and hard stops as colored blocks around
 the dial, drawn by the clock's own appointments scene (the calendar view the Glance app had).
 
 Each appointment is 8 bytes, decoded from Hypfer's captures (upstream/hypfer/sample_appointments.js;
@@ -31,7 +31,7 @@ MIN_MINUTES = 15  # one LED on a 12-hour ring of 48
 MAX_BLOCKS = 12
 MAX_BYTES = 500  # one Bluetooth write carries at most 512
 NAME_CHARS = 16
-COLORS = {"calendar": (0, 255, 255), "pickup": (184, 134, 11), "stop": (255, 0, 0)}  # as their alerts: Aqua, DarkGoldenRod, Red
+COLORS = {"calendar": (0, 255, 255), "pickup": (184, 134, 11), "dropoff": (124, 252, 0), "stop": (255, 0, 0)}  # as their alerts: Aqua, DarkGoldenRod, LawnGreen, Red
 
 
 def picture(clock, now):
@@ -46,7 +46,7 @@ def picture(clock, now):
     last = min(first + HOURS_AHEAD * 60, 24 * 60)
     spans = [(start, end, "calendar", title) for _uid, start, title, end in clock.events]
     spans += [(i["due"], i["due"] + 30 * 60, i["kind"], i["text"]) for i in clock.unread.items
-              if i.get("kind") in ("pickup", "stop") and i.get("due")]
+              if i.get("kind") in ("pickup", "dropoff", "stop") and i.get("due")]
     placed = []
     for start, end, kind, name in sorted(spans, key=lambda s: (s[0], -s[1])):  # longer first at the same start
         a, b = minute(start), minute(end)
