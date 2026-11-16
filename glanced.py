@@ -802,6 +802,11 @@ def make_app(clocks, shop_url=None, checks=None):
                 reply = reply or "Cleared."
                 if any(i.get("kind") == "checkin" for i in clock.unread.items):
                     reply += " Check-ins stay until they're done."
+                try:  # the clock shows it heard, with the same look as a confirmed check-in; the list is cleared either way
+                    await clock.alert("voice", text="{smiley} CLEARED", color="Lime", anim="Pulse", sound="NoneSound",
+                                      priority="critical")
+                except Exception as e:
+                    log.warning("clear confirm alert failed: %s", e)
         except ValueError as e:
             return web.json_response({"reply": f"Sorry, {e}.", "via": via})
         except shopapp.ERRORS:

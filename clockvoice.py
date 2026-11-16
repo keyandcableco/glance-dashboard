@@ -118,7 +118,8 @@ def parse_command(t):
         rest, rounds = int(m[2] or (5 if short else 10)), 4 if short else 3
         stages = [("WORK", work), ("BREAK", rest)] * rounds
         return "/stages", {"name": "FOCUS", "stages": stages[:-1]}, None  # end on the last WORK, not a break
-    if re.fullmatch(r"(?:clear|clear (?:it|all|everything)|all clear|dismiss(?: all)?)", t):
+    # "clear notifications" is how Greg says it: instant here, not Haiku's ~2 s
+    if re.fullmatch(r"(?:clear|clear (?:it|all|everything|(?:all |the |my )?notifications)|all clear|dismiss(?: all)?)", t):
         return "/unread/clear", {}, "Cleared."
     if m := re.match(r"(?:note|make a note|take a note|jot down|note to self)\b[\s,:;-]*(?:that\s+|to\s+)?(.+)", t):
         return "/note", {"text": m[1]}, None
