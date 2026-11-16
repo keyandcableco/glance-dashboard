@@ -18,6 +18,8 @@ import time
 
 from aiohttp import web
 from bleak import BleakClient
+from bleak.backends.bluezdbus.manager import get_global_bluez_manager
+from bleak.backends.device import BLEDevice
 from bless import BlessServer, GATTAttributePermissions, GATTCharacteristicProperties
 
 import animscreen
@@ -52,6 +54,7 @@ FLASH_S = 3.5  # the light flash runs 3 s; its scene is deleted after
 SOUND = 45  # [45, 0, 0, n] plays the clock's sound n, [45, 0, 0, 0] stops it
 SOUND_S = 5  # a played sound is stopped after this, since not every sound may end by itself
 RESYNC_AT, RESYNC_BY = datetime.time(3, 30), datetime.time(6)  # the night after a 2 am daylight-saving change
+RETRY_S, RETRY_MAX_S = 5, 300  # reconnect tries: 5 s after a drop; a clock not reached waits twice as long each time, up to 5 min
 PASSWORD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "panel_password")
 LOCAL = ("127.0.0.1", "::1")
 CTS_SERVICE = "00001805-0000-1000-8000-00805f9b34fb"
@@ -102,6 +105,21 @@ def adapter():
     except OSError:
         return None
     return min(names, key=lambda n: int(n[3:]), default=None)
+
+
+async def known_device(addr):
+    """A paired clock as BlueZ already lists it, so bleak connects to its D-Bus path at once instead of
+    scanning for it first: a scan keeps the adapter discovering, for up to 30 s when the clock isn't
+    there. BlueZ then waits for the clock's advertising itself. The path is built the way bleak builds
+    it, on the adapter bleak would scan with. None if BlueZ doesn't have it paired."""
+    try:
+        manager = await get_global_bluez_manager()
+        path = f"{manager.get_default_adapter()}/dev_{addr.upper().replace(':', '_')}"
+        if manager.is_paired(path):
+            return BLEDevice(addr, None, {"path": path})
+    except Exception as e:  # no adapter powered, BlueZ restarting: bleak's scan says what's wrong
+        log.debug("BlueZ lookup of %s failed: %s", addr, e)
+    return None
 
 
 async def start_time_server():
@@ -193,7 +211,11 @@ class Clock:
         return b"Paired: yes" in out
 
     async def keep_connected(self):
+        """Hold the link: retried 5 s after it drops, and a clock that can't be reached (out of range,
+        switched off) after 5 s, 10, 20 ... then every 5 minutes, so it doesn't keep the adapter busy
+        around the clock (an old adapter that's always looking is slow to pick up a mouse waking up)."""
         warned = False
+        delay = RETRY_S
         while True:
             # connecting to an unpaired clock makes the desktop pop a Bluetooth notice every try
             if not await self.paired():
@@ -203,10 +225,13 @@ class Clock:
                 await asyncio.sleep(60)
                 continue
             warned = False
+            linked = False
             try:
                 self.lost.clear()
-                self.client = BleakClient(self.addr, disconnected_callback=lambda _: self.lost.set())
+                device = await known_device(self.addr) or self.addr  # not listed: bleak scans for it
+                self.client = BleakClient(device, disconnected_callback=lambda _: self.lost.set())
                 await self.client.connect()
+                linked = True
                 log.info("%s: connected to %s", self.name, self.addr)
                 self.linked_offset = utc_offset()
                 with contextlib.suppress(Exception):  # a flash cut off by a lost link would keep strobing
@@ -214,8 +239,13 @@ class Clock:
                 await self.lost.wait()
                 log.warning("%s: disconnected", self.name)
             except Exception as e:  # BLE errors come in many types; just retry
-                log.warning("%s: connect failed: %s", self.name, e)
-            await asyncio.sleep(5)
+                log.warning("%s: connect failed: %s; trying again in %d s", self.name,
+                            str(e) or type(e).__name__, RETRY_S if linked else delay)
+            if linked:  # a link that just dropped is retried quickly; one that can't be made, less and less often
+                delay = RETRY_S
+            await asyncio.sleep(delay)
+            if not linked:
+                delay = min(delay * 2, RETRY_MAX_S)
 
     async def resync(self):
         """After a daylight-saving change drop the link once, so the clock reconnects and reads the time

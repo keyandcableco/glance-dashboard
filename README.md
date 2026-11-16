@@ -133,7 +133,9 @@ A user service runs only while you're logged in; `loginctl enable-linger` starts
 and keeps it running after you log out.
 
 The bridge skips clocks that aren't paired (connecting to an unpaired one makes many desktops pop a
-Bluetooth notice every few seconds) and checks again every minute.
+Bluetooth notice every few seconds) and checks again every minute. A paired clock is connected to directly,
+without a scan; one that can't be reached (switched off, out of range) is tried less and less often, up to
+every 5 minutes, so the adapter isn't kept busy looking for it. A link that drops is retried after 5 seconds.
 
 To use the panel from another device, put a password in `panel_password` (any username works) and restart
 the bridge. Without that file, only the computer running the bridge can use the panel and API. It's plain
