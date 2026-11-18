@@ -17,8 +17,9 @@ KEY_FILE = Path(__file__).parent / "anthropic_api_key"
 SYSTEM = """You turn a short spoken command into exactly one call to one of your tools. The words were \
 transcribed from speech across a workshop, so expect missing punctuation and misheard words; go by \
 the likely meaning. Times: give `minutes` for a duration from now ("in half an hour" = 30, "45 seconds" = 0.75) or `at` \
-as 24-hour HH:MM for a clock time ("after lunch" = 13:00, "end of day" = 17:00); set the other to 0 or \
-empty. Timer, pickup, drop-off and stop labels are short (a few words) and in capitals; text for the shop app \
+as 24-hour HH:MM for a clock time ("after lunch" = 13:00, "end of day" = 17:00; a bare "five" in \
+the shop's day is 17:00); set the other to 0 or empty. A pickup or drop-off on a later day ("tomorrow at \
+five", "Friday around noon") gets that day in `date` and the time in `at`. Timer, pickup, drop-off and stop labels are short (a few words) and in capitals; text for the shop app \
 (switch_job, wait_on_customer, customer_replied) stays as said, so names still match, and clock_out's \
 `done` is what the speaker says they did, in their own words. `clock` is empty unless the speaker \
 names one of the clocks (for change and cancel: the clock the item is on; move_to is where it goes). \
@@ -34,6 +35,12 @@ WHEN = {
 }
 
 
+# a pickup or drop-off on a later day: the day goes here, never in the name
+DAY = {"date": {"type": "string", "description": "YYYY-MM-DD when it's on a later day (tomorrow, Friday), else empty"}}
+NAME = ("Who: the person's name only, in capitals, then ' - ' and the instrument if one is said. Never a day, "
+        "time or other words from the sentence (TOMORROW, GONNA, ABOUT, AROUND).")
+
+
 def tools(clock_names, checkin_names=()):
     clock = {"type": "string", "enum": [*clock_names, ""],
              "description": "Which clock, only if the speaker named one; else empty"}
@@ -47,9 +54,9 @@ def tools(clock_names, checkin_names=()):
         tool("set_timer", "A timer or reminder: count down and alert when it's due.",
              {**WHEN, "label": {"type": "string", "description": "What it's for, or empty"}}),
         tool("add_pickup", "Someone is coming to pick something up (or drop by) at a time.",
-             {**WHEN, "name": {"type": "string", "description": "Who, and what if said"}}),
+             {**WHEN, **DAY, "name": {"type": "string", "description": NAME + " e.g. SAM - JUNO, or JOEY WHEATON"}}),
         tool("add_dropoff", "Someone is coming to drop an instrument off (bring it in for repair) at a time.",
-             {**WHEN, "name": {"type": "string", "description": "Who, and the instrument if said, e.g. SAM - RHODES"}}),
+             {**WHEN, **DAY, "name": {"type": "string", "description": NAME + " e.g. SAM - RHODES"}}),
         tool("confirm_dropoff", "A drop-off that was expected has come in: 'Sam dropped off the Rhodes', "
              "'the drop-off is here', 'Sam's here with the Juno'. Not for a new drop-off with a time.",
              {"what": {"type": "string", "description": "Words from its text as listed under Set now (e.g. the name); empty if not said"}}),
@@ -117,7 +124,7 @@ async def understand(api, text, clock_names, set_now="", checkin_names=()):
     one" can be found; for change and cancel, `what` should be words from that item's text."""
     if api is None:
         return None
-    now = datetime.datetime.now().strftime("%A %H:%M")
+    now = datetime.datetime.now().strftime("%A %Y-%m-%d %H:%M")
     try:
         response = await api.messages.create(
             model=MODEL,

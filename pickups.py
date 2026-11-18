@@ -46,8 +46,40 @@ def alert_of(kind):
     return {**ALERT, "sound": KINDS[kind].get("sound", ALERT["sound"])}
 
 
-def parse_when(when, now=None):
-    """'40', '40m', '30s', '1h', '1h30', '1:30' (from now) or '2:30pm', '14:30', '3pm' (clock time) -> epoch seconds."""
+DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+
+def day_of(day, now=None):
+    """'today', 'tomorrow', a weekday ('friday': the next one, today if it's Friday) or 'YYYY-MM-DD' -> a date;
+    None for ''. A day already past is refused."""
+    now = now or datetime.datetime.now()
+    d = str(day or "").strip().lower()
+    if not d:
+        return None
+    if d in ("today", "tonight"):
+        return now.date()
+    if d == "tomorrow":
+        return now.date() + datetime.timedelta(days=1)
+    if d in DAYS:
+        return now.date() + datetime.timedelta(days=(DAYS.index(d) - now.weekday()) % 7)
+    try:
+        date = datetime.date.fromisoformat(d)
+    except ValueError:
+        raise ValueError(f"I didn't catch the day {day!r}") from None
+    if date < now.date():
+        raise ValueError(f"{date:%A %B} {date.day} is already past")
+    return date
+
+
+def later_day(due, now=None):
+    """True when epoch `due` falls on a day after today (local time)."""
+    now = now or datetime.datetime.now()
+    return datetime.datetime.fromtimestamp(due).date() > now.date()
+
+
+def parse_when(when, now=None, day=None):
+    """'40', '40m', '30s', '1h', '1h30', '1:30' (from now) or '2:30pm', '14:30', '3pm' (clock time) -> epoch seconds.
+    With a day (a date, from day_of) a clock time is on that day; a time from now ignores it."""
     now = now or datetime.datetime.now()
     w = str(when).strip().lower().replace(" ", "")
     if m := re.fullmatch(r"(\d+)(?:m|min)?", w):
@@ -66,6 +98,10 @@ def parse_when(when, now=None):
             hours = [hour, hour + 12]  # "2:30" is whichever 2:30 comes next
         else:
             hours = [hour]
+        if day is not None and day != now.date():  # "tomorrow around 5": 5 pm that day, not 5 am
+            times = [datetime.datetime.combine(day, datetime.time(h, minute)) for h in hours]
+            daytime = [t for t in times if DAY_START <= t.hour < DAY_END] if len(hours) > 1 else []
+            return min(daytime or times).timestamp()
         times = [now.replace(hour=h, minute=minute, second=0, microsecond=0) + datetime.timedelta(days=d)
                  for d in (0, 1) for h in hours]
         upcoming = [t for t in times if t > now]

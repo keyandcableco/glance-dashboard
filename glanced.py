@@ -515,6 +515,36 @@ def make_app(clocks, shop_url=None, checks=None):
             return web.json_response({"error": f"bad stages: {e}"}, status=400)
         return web.json_response(item)
 
+    async def book(clock, name, when, kind="pickup", day=""):
+        """Add a timer, pickup, drop-off or stop. A pickup or drop-off on a later day ("tomorrow at 5")
+        goes to the shop app's pickups, which puts it on the clock on its day (pickupsync), instead of
+        today's clock: (None, the shop app's pickup). Anything else, or with the shop app out of reach:
+        (the clock item, None). Raises ValueError for a time or day it can't read."""
+        date = pickups.day_of(day)
+        due = pickups.parse_when(when, day=date)
+        if date == datetime.date.today() and pickups.later_day(due) and not re.fullmatch(r"\d+(?:m|s|h\d*m?)?", str(when)):
+            raise ValueError(f"{when} today is already past")
+        # only with a day said: a bare time already past today ("at 3", said at 3:30) stays on the clock as before
+        if kind in pickupsync.SHARED and shop_url and date and pickups.later_day(due):
+            body = {"name": name or ("Drop-off" if kind == "dropoff" else "Pickup"), "at": pickupsync.local_iso(due),
+                    "kind": kind, "ref": f"voice-{round(due)}-{name}"[:64]}  # said twice: the same one, not two
+            try:
+                status, answer = await shopapp.call(shop_url, "POST", "/api/pickups", body)
+            except shopapp.ERRORS as e:
+                status, answer = None, {"say": str(e)}
+            if status == 200 and isinstance(answer.get("pickup"), dict):
+                log.info("%s for a later day, to the shop app: %s %s", kind, name, answer["pickup"].get("when"))
+                return None, {**answer["pickup"], "due": due}
+            log.warning("shop app didn't take the %s for a later day (HTTP %s %s): on the clock instead",
+                        kind, status, answer.get("say", ""))
+        return await pickups.add(clock, name, None, kind, due=due), None
+
+    def later_reply(kind, shop):
+        label = "Drop-off" if kind == "dropoff" else "Pickup"
+        due = datetime.datetime.fromtimestamp(shop["due"])
+        return (f"{label}, {shop['name']}, {due:%A} at {pickups.clock_time(shop['due'])}. "
+                f"It's in the shop app and goes on the clock that day.")
+
     async def add_pickup(request):
         body = await read_body(request)
         kind = body.get("kind", "pickup")
@@ -522,10 +552,11 @@ def make_app(clocks, shop_url=None, checks=None):
                 or (kind in ("pickup", "dropoff") and not str(body.get("name", "")).strip())):
             return web.json_response({"error": "when (and a name for pickups and drop-offs) required"}, status=400)
         try:
-            item = await pickups.add(pick(request, body), str(body.get("name", "")).strip(), body["when"], kind)
+            item, shop = await book(pick(request, body), str(body.get("name", "")).strip(), body["when"], kind,
+                                    str(body.get("day") or ""))
         except ValueError as e:
             return web.json_response({"error": str(e)}, status=400)
-        return web.json_response(item)
+        return web.json_response(item or {"shop_pickup": shop, "say": later_reply(kind, shop)})
 
     def find_dropoff(what="", clock_name="", item_id=""):
         """(clock, drop-off) meant: by its id on the named clock, else the one with the most of the
@@ -588,7 +619,11 @@ def make_app(clocks, shop_url=None, checks=None):
         target = {"clock": args["clock"]} if args.get("clock") else {}
         if name in ("set_timer", "add_pickup", "add_dropoff") and when:
             kind = {"set_timer": "timer", "add_pickup": "pickup", "add_dropoff": "dropoff"}[name]
-            return "/pickup", {"kind": kind, "name": args.get("label") or args.get("name") or "", "when": when, **target}
+            label, day = args.get("label") or args.get("name") or "", "" if minutes else (args.get("date") or "")
+            if kind != "timer":  # a day Haiku left in the name ("SCOTT - TOMORROW") is the day, not the name
+                label, said = clockvoice.name_and_day(label)
+                day = day or ("" if minutes else said)
+            return "/pickup", {"kind": kind, "name": label, "when": when, **({"day": day} if day else {}), **target}
         if name == "confirm_dropoff":
             return "/dropoff/arrived", {"what": args.get("what", ""), **target}
         if name == "show_message":
@@ -791,8 +826,9 @@ def make_app(clocks, shop_url=None, checks=None):
             elif path == "/cancel":
                 reply = await cancel({**args, "clock": request_clock})
             elif path == "/pickup":
-                item = await pickups.add(clock, args.get("name", ""), args["when"], args.get("kind", "pickup"))
-                reply = clockvoice.spoken_due(item)
+                item, shop = await book(clock, args.get("name", ""), args["when"], args.get("kind", "pickup"),
+                                        args.get("day", ""))
+                reply = clockvoice.spoken_due(item) if item else later_reply(args.get("kind", "pickup"), shop)
             elif path == "/notify":
                 await clock.alert("voice", **args)
                 reply = reply or "On the clock."

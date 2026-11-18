@@ -5,6 +5,7 @@
     clock, timer an hour and a half for lunch    clock, Sam is picking up the Juno at 2:30
     clock, pickup Sam in 40 minutes              clock, show back in 5
     clock, Sam's dropping off a Rhodes at 3      clock, Sam dropped off the Rhodes   (confirms it)
+    clock, Dean's coming at 3                    clock, Bill will be here Friday around noon  (a later day: the shop app)
     clock, clear                                 clockvoice.py --dry-run "clock, timer 30 minutes"
     clock, family, timer 10 minutes              (a clock's name first sends it to that clock)
     clock, focus 50                              (staged: WORK 50 / BREAK 10, three rounds, ending on WORK)
@@ -43,7 +44,37 @@ def words_to_digits(text):
         return str(sum(TENS.get(p, UNITS.get(p, 0)) for p in m[0].replace("-", " ").split()))
     names = "|".join(sorted(list(TENS) + list(UNITS), key=len, reverse=True))
     t = re.sub(rf"\b({names})(?:[ -]({'|'.join(UNITS)}))?\b(?= (?:minutes?|mins?|hours?|hrs?|seconds?)\b)", number, t)
-    return t
+    # clock times said as words: "at five", "around five thirty", "five pm", "noon", "half past four"
+    t = re.sub(r"\b(?:noon|midday)\b", "12:00pm", t)
+    hours = "|".join(sorted(HOURS, key=len, reverse=True))
+    mins = r"(?:oh )?(?:(?:twenty|thirty|forty|fifty)(?:[ -](?:one|two|three|four|five|six|seven|eight|nine))?|ten|fifteen|five)"
+    t = re.sub(rf"\b(?:half past|quarter past) ({hours})\b",
+               lambda m: f"{HOURS[m[1]]}:{'30' if m[0].startswith('half') else '15'}", t)
+
+    def clock_words(m):
+        minute = sum(TENS.get(p, UNITS.get(p, 0)) for p in (m[3] or "").replace("-", " ").split() if p != "oh")
+        return f"{m[1] or ''}{HOURS[m[2]]}{f':{minute:02d}' if m[3] else ''}"
+    t = re.sub(rf"\b((?:at|around|about|by|after|till|until) )({hours})(?: ({mins}))?\b(?! (?:minutes?|mins?|hours?|hrs?|seconds?)\b| (?:past|to|after|of|till|before) (?:the )?(?:hour|\d|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b)",
+               clock_words, t)
+    t = re.sub(rf"\b()({hours})(?: ({mins}))?(?= ?(?:a\.?m\.?|p\.?m\.?|o'?clock)\b)", clock_words, t)
+    return " ".join(t.split())
+
+
+HOURS = {w: UNITS[w] for w in ("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+                               "eleven", "twelve")}
+DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+DAY_WORDS = re.compile(r"\b(?:(?:on|this|next|for)\s+)?(today|tonight|tomorrow|" + "|".join(DAYS) + r")"
+                       r"(?:\s+(morning|afternoon|evening|night))?\b")
+
+
+def day_said(t):
+    """'tomorrow', 'friday', 'today' (also for 'tonight'), or '' when no day is said; and 'am'/'pm' when
+    the part of the day says which ('tomorrow afternoon', 'tonight'), else ''."""
+    m = DAY_WORDS.search(t)
+    if not m:
+        return "", ""
+    part = "pm" if m[1] == "tonight" or m[2] in ("afternoon", "evening", "night") else "am" if m[2] == "morning" else ""
+    return ("today" if m[1] == "tonight" else m[1]), part
 
 
 def duration(t):
@@ -58,14 +89,65 @@ def duration(t):
     return f"{h[1]}h{m[1] if m else ''}" if h else f"{m[1]}m"
 
 
-def clock_time(t):
-    """'2:30', '2:30 pm', '14:30', '3 pm', '3 o'clock' -> bridge 'when', else None."""
-    m = re.search(r"\b(\d{1,2})(?::(\d{2}))? ?(a\.?m\.?|p\.?m\.?|o'?clock)?(?!\s*(?:minutes?|mins?|hours?|hrs?)\b)", t)
-    if not m or not (m[2] or m[3]):
-        return None
-    suffix = (m[3] or "").replace(".", "")
-    suffix = "" if "clock" in suffix else suffix
-    return f"{m[1]}:{m[2] or '00'}{suffix}"
+def clock_time(t, part=""):
+    """'2:30', '2:30 pm', '14:30', '3 pm', '3 o'clock', 'at 3', 'around 5' -> bridge 'when', else None.
+    part ('am'/'pm', from 'tomorrow afternoon' or 'tonight') goes on a time said without one."""
+    for m in re.finditer(r"(?:\b(at|around|about|by|after|till|until)\s+)?\b(\d{1,2})(?!\d)(?::(\d{2}))? ?"
+                         r"(a\.?m\.?|p\.?m\.?|o'?clock)?(?!\s*(?:minutes?|mins?|hours?|hrs?|seconds?|secs?)\b)", t):
+        if not (m[1] or m[3] or m[4]):
+            continue
+        suffix = (m[4] or "").replace(".", "")
+        suffix = "" if "clock" in suffix else suffix
+        if not suffix and int(m[2]) <= 12:
+            suffix = part
+        return f"{m[2]}:{m[3] or '00'}{suffix}"
+    return None
+
+
+def name_and_day(label):
+    """A pickup name with a day left in it ('SCOTT BUTCH - TOMORROW', from Haiku) -> ('SCOTT BUTCH', 'tomorrow');
+    a name with none comes back as it was, with ''."""
+    said, _part = day_said(label.lower())
+    if not said:
+        return label, ""
+    rest = re.sub(r"\s*-\s*$|^\s*-\s*", "", DAY_WORDS.sub(" ", label.lower()).strip())
+    return who_and_what(rest) or label, said
+
+
+# What's left of a pickup or drop-off sentence once the time and day are out, word by word: everything
+# here goes, so "Joey Wheaton's gonna pick up in about" is JOEY WHEATON. Never the first word (Will, Bill).
+FILLER = {"is", "are", "was", "will", "would", "should", "could", "be", "gonna", "going", "to", "come", "comes",
+          "coming", "came", "in", "by", "over", "back", "pick", "picks", "picking", "picked", "up", "pickup",
+          "pickups", "here", "there", "stop", "stops", "stopping", "swing", "swinging", "show", "showing", "due",
+          "about", "around", "roughly", "approximately", "ish", "at", "sometime", "get", "grab", "collect",
+          "drop", "drops", "dropping", "off", "dropoff", "bring", "brings", "bringing", "ok", "okay", "so", "and",
+          "probably", "maybe", "supposed", "planning", "expected", "expecting", "then", "for", "or", "so", "just",
+          "morning", "afternoon", "evening", "night", "said", "says", "today", "tonight", "tomorrow", "on",
+          "this", "next", *DAYS}
+LEAD = re.compile(r"^(?:(?:um|uh|ok|okay|so|hey|and|in|about|around|at|by)\s+)*"
+                  r"(?:(?:set|add|put|make|book|schedule|new)\s+)?(?:(?:a|an|the|me)\s+)?"
+                  r"(?:(?:pick\s*-?\s*ups?|drop\s*-?\s*offs?)\s+)?(?:(?:for|with|from)\s+)?")
+# a sentence about the speaker or a question, not someone coming: "I'll be here till 6", "who's coming at 3"
+NOT_WHO = re.compile(r"(?:i|i'm|i'll|im|ill|we|we're|we'll|who|who's|whos|what|when|you|it|it's|there|they|he|she|"
+                     r"come|get|go|hard stop)\b")
+ARTICLE = {"the", "his", "her", "their", "a", "an", "my", "some", "its"}
+
+
+def who_and_what(rest):
+    """'joey wheaton's gonna pick up about' -> 'JOEY WHEATON'; 'sam is picking up the juno' -> 'SAM - JUNO'."""
+    rest = re.sub(r"[,.;:!?]", " ", rest)
+    rest = re.sub(r"'(?:s|ll|re)\b(?=\s+(?:gonna|going|coming|come|picking|pick|be|here|stopping|stop|swinging|"
+                  r"swing|showing|show|due|about|supposed|planning|dropping|drop|bringing|bring|probably)\b)", "", rest)
+    rest = re.sub(r"\b(?:what|which|that)\b.*", "", rest)  # "Bob's picking up what Sam dropped off"
+    words = LEAD.sub("", " ".join(rest.split())).split()
+    if not words:
+        return ""
+    words = words[:1] + [w for w in words[1:] if w not in FILLER]
+    split = next((i for i, w in enumerate(words) if i and w in ARTICLE), None)
+    if split is None:
+        return tidy(" ".join(words))
+    who, what = " ".join(words[:split]), " ".join(w for w in words[split + 1:] if w not in ARTICLE)
+    return tidy(f"{who} - {what}" if what else who)
 
 
 def strip_time(t):
@@ -130,28 +212,34 @@ def parse_command(t):
     # confirms one. Never inside a timer or reminder ("remind me in 20 minutes to drop off the invoice") or
     # a pickup ("Bob's picking up what Sam dropped off at 5").
     errand = re.search(r"\b(?:timer|remind|alarm|wake me|ping me|nudge me)\b|\bpick(?:ing)?\s*-?\s*up\b|\bpickup\b", t)
-    when = duration(t) or clock_time(t)
-    if not errand and not when and re.search(
-            r"\bdropped\b(?:\s+\S+){0,4}?\s+off\b|\bdrop\s*-?\s*off(?: is|'s)? (?:here|in)\s*$", t):
+    day, part = day_said(t)
+    when = duration(t) or clock_time(t, part)
+    booked = {"day": day} if day and not duration(t) else {}
+    odd_day = re.search(r"\bday after\b|\bweeks?\b|\bnext (?:" + "|".join(DAYS) + r")\b|\d+ (?:past|to|till|before) \d", t)  # "in 40 minutes" is from now, whatever day is said
+    if not errand and (re.search(r"\bdropped\b(?:\s+\S+){0,4}?\s+off\b", t) or not when and re.search(
+            r"\bdrop\s*-?\s*off(?: is|'s)? (?:here|in)\s*$", t)):
         what = re.sub(r"\b(?:dropped|drop\s*-?\s*off|off|is|'s|here|in|just|has|have|already)\b", " ", t)
         return "/dropoff/arrived", {"what": " ".join(what.replace("'s", " ").split())}, None
     if not errand and re.search(r"\bdrop(?:ping|s)?\s*-?\s*off\b", t):
         if not when:
             return None
-        rest = strip_time(t)
-        rest = re.sub(r"\b(?:is|are|will be|will|'s)?\s*(?:coming (?:in |by )?to )?drop(?:ping|s)?\s*-?\s*off\b", " ", rest)
-        rest = re.sub(r"^(?:a\s+)?(?:new\s+)?", "", " ".join(rest.split()))
-        return "/pickup", {"kind": "dropoff", "name": tidy(rest) or "someone", "when": when}, None
-    if re.search(r"\bpick(?:ing)?\s*-?\s*up\b|\bpickup\b|\bcoming (?:in|by)\b", t):
-        when = duration(t) or clock_time(t)
-        if not when:
+        if odd_day:
             return None
-        rest = strip_time(t)
-        rest = re.sub(r"\b(?:is|are|will be|'s)?\s*(?:picking up|pick up|pickup|coming in|coming by|coming)\b", " ", rest)
-        return "/pickup", {"kind": "pickup", "name": tidy(rest) or "someone", "when": when}, None
+        rest = DAY_WORDS.sub(" ", strip_time(t))
+        return "/pickup", {"kind": "dropoff", "name": who_and_what(rest) or "someone", "when": when, **booked}, None
+    # a pickup: said outright, or someone coming by ("Dean's coming at 3", "Bill will be here Friday around
+    # noon"), the loose ones only outside a timer or reminder sentence
+    timerish = re.search(r"\b(?:timer|remind|alarm|wake me|ping me|nudge me)\b", t)
+    if re.search(r"\bpick(?:ing)?\s*-?\s*up\b|\bpickup\b", t) or (not timerish and not NOT_WHO.match(t) and re.search(
+            r"\bcom(?:e|es|ing)\b(?!\s+home)|\bbe (?:here|by)\b|\b(?:stop|swing)(?:s|ping|ging)? by\b|"
+            r"\bshow(?:s|ing)? up\b", t)):
+        if not when or odd_day or NOT_WHO.match(t):
+            return None
+        rest = DAY_WORDS.sub(" ", strip_time(t))
+        return "/pickup", {"kind": "pickup", "name": who_and_what(rest) or "someone", "when": when, **booked}, None
     if re.search(r"\b(?:timer|remind|alarm|wake me|ping me|nudge me)\b", t):
         when = duration(t) or clock_time(t)
-        if not when:
+        if not when or (day and not duration(t)):  # "remind me tomorrow at 5": timers are today's only
             return None
         rest = strip_time(t)
         rest = re.sub(r"\b(?:set\s+)?(?:a\s+)?(?:timer|alarm)\b|\bremind me\b|\bping me\b|\bnudge me\b", " ", rest)

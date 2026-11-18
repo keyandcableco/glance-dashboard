@@ -7,7 +7,9 @@ Every SYNC_SECONDS, across all clocks:
 - one cleared on a clock before its time is cancelled there (POST /api/pickups/cancel {"id"});
 - a drop-off confirmed come in on a clock (arrive(): voice, the panel's Arrived) is confirmed there
   too (POST /api/pickups/arrived {"id"});
-- one typed into the shop app is put on the first clock, where it alerts like any other;
+- one typed into the shop app is put on the first clock, where it alerts like any other, on its day
+  (on_its_day: a pickup for tomorrow said by voice is held there until then);
+- a pickup's name gets its instrument when the shop app matches it to one on the bench (with_instrument);
 - one cancelled in the shop app comes off the clock, if it's still ahead, and so does a drop-off
   confirmed there ("arrived_at").
 Timers and hard stops stay on the clock only. If the shop app can't be reached, nothing is lost:
@@ -73,6 +75,22 @@ async def arrive(clock, item):
     clock.unread.clear(item["id"])
     await clock.refresh_ring()
     log.info("%s: drop-off in: %s", clock.name, item["text"])
+
+
+def on_its_day(due, now):
+    """A pickup the shop app holds for a later day comes onto the clock (and alerts) on its day, from
+    pickups.DAY_START, or an hour before it's due if that's earlier; not at midnight, not days ahead."""
+    start = datetime.datetime.fromtimestamp(due).replace(hour=pickups.DAY_START, minute=0, second=0, microsecond=0)
+    return now >= min(start.timestamp(), due - 3600)
+
+
+def with_instrument(name, pickup, kind):
+    """'JOEY WHEATON' -> 'JOEY WHEATON - KORG SV-1' when the shop app matched the pickup to an instrument on
+    the bench and the name doesn't say one yet (a drop-off's instrument isn't in yet)."""
+    instrument = str(pickup.get("instrument") or "").strip()
+    if kind != "pickup" or not instrument or " - " in name or not name:
+        return name
+    return f"{name} - {instrument.upper() if name.isupper() else instrument}"[:60]
 
 
 def local_iso(epoch):
@@ -141,7 +159,14 @@ async def send_changes(clocks, url, state, now):
                 body["id"] = item["shop_id"]
             status, answer = await shopapp.call(url, "POST", "/api/pickups", body)
             if status == 200 and isinstance(answer.get("pickup"), dict):
+                first = not item.get("shop_id")
                 item["shop_id"], item["shop_sent"] = answer["pickup"]["id"], want
+                named = with_instrument(item.get("name", ""), answer["pickup"], item["kind"])
+                if first and named != item.get("name"):  # the clock's name only: the shop app keeps its match
+                    item["name"] = named
+                    item["text"] = pickups.text_of(item)
+                    item["shop_sent"] = [named, round(item["due"])]
+                    log.info("%s: pickup named with its instrument: %s", clock.name, named)
                 if item["id"] in _arrived:  # came in while this send was out: confirm it, don't cancel it
                     _arrived.discard(item["id"])
                     if item["shop_id"] not in state["arrive"]:
@@ -205,10 +230,10 @@ async def exchange(clocks, url, state, now):
                 due = datetime.datetime.fromisoformat(str(p.get("at"))).timestamp()
             except ValueError:
                 continue
-            if due <= now:
+            if due <= now or not on_its_day(due, now):
                 continue
             kind = "dropoff" if p.get("kind") == "dropoff" else "pickup"
-            name = str(p.get("name") or ("Drop-off" if kind == "dropoff" else "Pickup"))
+            name = with_instrument(str(p.get("name") or ("Drop-off" if kind == "dropoff" else "Pickup")), p, kind)
             state["seen"][sid] = due  # before the add's awaits: a clear during them is caught
             item = await pickups.add(first, name, None, kind, due=due)
             item["shop_id"], item["shop_sent"] = sid, [name, round(due)]
